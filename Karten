@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Karten</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1f5f5b">
+<style>
+:root{--bg:#f2f4f6;--surf:#fff;--ink:#1c2630;--mute:#64707c;--line:#d6dce1;--acc:#1f5f5b;--accfg:#fff;--gap:#dbe9e7;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root{--bg:#12181e;--surf:#1b242c;--ink:#e6ebef;--mute:#8d99a5;--line:#2c3842;--acc:#5fb3ab;--accfg:#0d1a19;--gap:#26403d}}
+*{box-sizing:border-box}html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,sans-serif;max-width:640px;margin:0 auto;padding:12px 14px 40px}
+nav{display:flex;gap:6px;margin-bottom:16px}
+nav button{flex:1;background:none;border:0;border-bottom:3px solid var(--line);padding:10px 0;color:var(--mute);font:inherit}
+nav button.on{border-color:var(--acc);color:var(--ink);font-weight:600}
+button,select,input,textarea{font:inherit;color:inherit}
+.b{background:var(--acc);color:var(--accfg);border:0;border-radius:8px;padding:12px 16px;margin:4px 4px 4px 0;cursor:pointer}
+.b.g{background:none;color:var(--ink);border:1px solid var(--line)}
+.card{background:var(--surf);border:1px solid var(--line);border-radius:12px;padding:20px;margin:12px 0;font:19px/1.6 Georgia,'Times New Roman',serif;white-space:pre-wrap}
+.card ol{margin:12px 0 0;padding-left:22px}.card li{margin:6px 0}
+.card hr{border:0;border-top:1px solid var(--line);margin:14px 0}
+.gap{background:var(--gap);color:var(--acc);padding:0 6px;border-radius:4px}
+.hit{color:var(--acc)}
+.mute{color:var(--mute);font-size:14px}
+.rate{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.rate .b{margin:0;padding:12px 4px}
+input,select,textarea{width:100%;background:var(--surf);border:1px solid var(--line);border-radius:8px;padding:10px;margin:4px 0 10px}
+textarea{min-height:90px}
+.row{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding:9px 0;gap:10px}
+.row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+</style></head><body>
+<nav id="nav"></nav><main id="app"></main>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const today=()=>Math.floor((Date.now()-new Date().getTimezoneOffset()*6e4)/864e5);
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const TYPES={basic:'Frage / Antwort',cloze:'Lückentext',steps:'Stufenweise aufdecken'};
+let S={decks:[],cards:[]},tab='learn',filter='all',queue=[],cur=null,shown=false,step=1,editId=null;
+
+/* Speicher: der ganze Zustand liegt als ein Objekt in IndexedDB */
+const idb=new Promise((ok,no)=>{const r=indexedDB.open('karten',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});
+async function load(){const db=await idb;return new Promise(ok=>{const q=db.transaction('kv').objectStore('kv').get('state');q.onsuccess=()=>ok(q.result);q.onerror=()=>ok(null)})}
+async function save(){const db=await idb;db.transaction('kv','readwrite').objectStore('kv').put(S,'state')}
+
+/* Wiederholungs-Algorithmus (SM-2-Variante). r: 0 Nochmal, 1 Schwer, 2 Gut, 3 Leicht */
+function review(c,r){
+  if(r===0){c.interval=0;c.ease=Math.max(1.3,c.ease-.2);c.due=today();}
+  else{
+    if(c.interval===0)c.interval=1;
+    else if(c.interval===1)c.interval=3;
+    else c.interval=Math.max(c.interval+1,Math.round(c.interval*c.ease*[.8,1,1.3][r-1]));
+    c.ease=Math.max(1.3,c.ease+[-.15,0,.15][r-1]);
+    c.due=today()+c.interval;
+  }
+  c.reps++;save();
+}
+const dueCards=()=>S.cards.filter(c=>c.due<=today()&&(filter==='all'||c.deck===filter));
+const lines=c=>c.back.split('\n').filter(x=>x.trim());
+const cloze=(t,show)=>esc(t).replace(/\{\{c\d+::(.*?)\}\}/g,(m,a)=>show?`<b class=hit>${a}</b>`:'<span class=gap>[…]</span>');
+function next(){cur=queue.shift()||null;shown=false;step=1;render()}
+function start(){queue=dueCards().sort(()=>Math.random()-.5);next()}
+function rate(r){const c=cur;review(c,r);if(r===0)queue.push(c);next()}
+
+function learnView(){
+  const opts=`<option value=all>Alle Stapel</option>`+S.decks.map(d=>`<option value=${d.id} ${filter===d.id?'selected':''}>${esc(d.name)}</option>`).join('');
+  if(!cur){const n=dueCards().length;
+    return `<select onchange="filter=this.value;render()">${opts}</select>
+    <p>${n?`<b>${n}</b> Karten fällig.`:'Heute ist nichts fällig.'}</p>
+    ${n?'<button class=b onclick=start()>Lernen starten</button>':''}`}
+  const L=cur.type==='steps'?lines(cur):[];
+  const done=cur.type==='steps'?step>=L.length:shown;
+  let h='<div class=card>';
+  if(cur.type==='cloze')h+=cloze(cur.front,shown)+(shown&&cur.back?`<hr>${esc(cur.back)}`:'');
+  else if(cur.type==='steps')h+=esc(cur.front)+`<ol>${L.slice(0,step).map(x=>`<li>${esc(x)}</li>`).join('')}</ol>`;
+  else h+=esc(cur.front)+(shown?`<hr>${esc(cur.back)}`:'');
+  h+='</div>';
+  if(!done)h+=cur.type==='steps'
+    ?`<button class=b onclick="step++;render()">Nächster Punkt (${step}/${L.length})</button><button class="b g" onclick="step=${L.length};render()">Alle zeigen</button>`
+    :`<button class=b onclick="shown=true;render()">Antwort zeigen</button>`;
+  else h+=`<div class=rate>${['Nochmal','Schwer','Gut','Leicht'].map((t,i)=>`<button class="b ${i?'':'g'}" onclick=rate(${i})>${t}</button>`).join('')}</div>`;
+  return h+`<p class=mute>Noch ${queue.length} danach</p>`;
+}
+
+function cardsView(){
+  const e=S.cards.find(c=>c.id===editId)||{type:'basic',front:'',back:'',deck:filter!=='all'?filter:S.decks[0]?.id};
+  const dk=`<input id=dn placeholder="Neuer Stapel, z. B. Strafrecht AT"><button class="b g" onclick=addDeck()>Stapel anlegen</button>`;
+  if(!S.decks.length)return `<p>Lege zuerst einen Stapel an.</p>${dk}`;
+  return `${dk}<hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+  <select id=cd>${S.decks.map(d=>`<option value=${d.id} ${e.deck===d.id?'selected':''}>${esc(d.name)}</option>`).join('')}</select>
+  <select id=ct onchange="hint()">${Object.entries(TYPES).map(([k,v])=>`<option value=${k} ${e.type===k?'selected':''}>${v}</option>`).join('')}</select>
+  <textarea id=cf placeholder="Vorderseite / Frage / Lückentext">${esc(e.front)}</textarea>
+  <textarea id=cb placeholder="Rückseite / Punkte">${esc(e.back)}</textarea>
+  <p class=mute id=h></p>
+  <button class=b onclick=saveCard()>${editId?'Änderung speichern':'Karte speichern'}</button>${editId?'<button class="b g" onclick="editId=null;render()">Abbrechen</button>':''}
+  <h3>Karten (${S.cards.length})</h3>
+  ${S.cards.slice().reverse().map(c=>`<div class=row><span onclick="editId='${c.id}';render();scrollTo(0,0)">${esc(c.front.slice(0,70))}</span><button class="b g" onclick="del('${c.id}')">Löschen</button></div>`).join('')}`;
+}
+function hint(){const t=$('#ct').value;$('#h').textContent={basic:'Normale Karte: Frage vorn, Antwort hinten.',cloze:'Lücken so schreiben: Der {{c1::Vorsatz}} umfasst Wissen und Wollen. Rückseite ist optional.',steps:'Hinten: ein Prüfungsschritt pro Zeile. Beim Lernen deckst du sie nacheinander auf.'}[t]}
+function addDeck(){const n=$('#dn').value.trim();if(!n)return;S.decks.push({id:uid(),name:n});save();render()}
+function saveCard(){
+  const f=$('#cf').value.trim(),b=$('#cb').value.trim(),t=$('#ct').value;
+  if(!f||(t!=='cloze'&&!b))return alert('Bitte Vorder- und Rückseite ausfüllen.');
+  if(t==='cloze'&&!/\{\{c\d+::/.test(f))return alert('Mindestens eine Lücke nötig: {{c1::Text}}');
+  if(editId){Object.assign(S.cards.find(c=>c.id===editId),{deck:$('#cd').value,type:t,front:f,back:b});editId=null}
+  else S.cards.push({id:uid(),deck:$('#cd').value,type:t,front:f,back:b,interval:0,ease:2.5,due:today(),reps:0});
+  save();render()}
+function del(id){if(confirm('Karte löschen?')){S.cards=S.cards.filter(c=>c.id!==id);save();render()}}
+
+function dataView(){return `<p>Sichere deine Karten regelmäßig als Datei.</p>
+  <button class=b onclick=exp()>Backup exportieren</button>
+  <p><label class="b g" style="display:inline-block">Backup importieren<input type=file accept=.json hidden onchange="imp(this.files[0])"></label></p>
+  <p class=mute>Beim Import wird alles Bestehende ersetzt.</p>`}
+function exp(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S)],{type:'application/json'}));a.download='karten-'+new Date().toISOString().slice(0,10)+'.json';a.click()}
+function imp(f){if(!f||!confirm('Bestehende Daten ersetzen?'))return;f.text().then(t=>{const d=JSON.parse(t);if(!d.decks||!d.cards)return alert('Ungültige Datei.');S=d;save();render()})}
+
+function render(){
+  $('#nav').innerHTML=[['learn','Lernen'],['cards','Karten'],['data','Daten']].map(([k,v])=>`<button class="${tab===k?'on':''}" onclick="tab='${k}';cur=null;render()">${v}</button>`).join('');
+  $('#app').innerHTML={learn:learnView,cards:cardsView,data:dataView}[tab]();
+  if(tab==='cards')hint();
+}
+load().then(d=>{if(d)S=d;render()});
+if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();
+if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
+</script></body></html>
