@@ -43,6 +43,12 @@ details{margin:10px 0}summary{cursor:pointer;font-weight:600;padding:6px 0}
 .kpi div{background:var(--surf);border:1px solid var(--line);border-radius:10px;padding:10px}
 .kpi b{display:block;font-size:22px}.kpi span{color:var(--mute);font-size:12px}
 table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:right;padding:6px 4px;border-bottom:1px solid var(--line)}th:first-child,td:first-child{text-align:left}
+:root{--cf:Georgia,'Iowan Old Style','Times New Roman',serif;--fs:19px}
+.card{font-family:var(--cf);font-size:var(--fs)}
+.b{min-height:44px}.card~.b{min-height:50px}.rate .b{min-height:56px}
+.top{display:flex;justify-content:space-between;align-items:center}
+.ol2 div{margin:6px 0}.ds b{display:block;color:var(--acc);font:600 13px system-ui,sans-serif;margin-top:12px}
+.box{background:var(--surf);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:10px 0}
 </style></head><body>
 <div id="upd" class="banner" hidden><span>Neue Version verfügbar.</span><button onclick="location.reload()">Neu laden</button></div>
 <nav id="nav"></nav><main id="app"></main>
@@ -50,7 +56,7 @@ table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:right;
 <script>
 /* Die Firebase-Zugangsdaten stehen in der Datei config.js (einmal anlegen, bleibt bei Updates unberührt). */
 const CFG=window.CFG||{};
-const APP_V='2.0';
+const APP_V='2.1';
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -61,7 +67,7 @@ const dayStr=d=>new Date(d*864e5).toLocaleDateString('de-DE',{day:'2-digit',mont
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 const ls=(k,v)=>{try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch{return null}};
 const DEV=ls('dev')||(()=>{const v=uid();ls('dev',v);return v})();
-const TYPES={basic:'Frage / Antwort',cloze:'Lückentext',steps:'Stufenweise aufdecken'};
+const TYPES={basic:'Frage / Antwort',cloze:'Lückentext',steps:'Stufenweise aufdecken',outline:'Schema mit Gliederung',dispute:'Meinungsstreit'};const APP_V2=1;
 const KINDS=['decks','cards','logs','settings'];
 const G='https://www.gstatic.com/firebasejs/10.14.1/';
 
@@ -349,13 +355,34 @@ function undoLast(){
   const u=undo.pop();if(!u)return;
   const c=M.cards.get(u.id);if(!c||c.deleted)return render();
   if(u.snap){UF.forEach(k=>{if(u.snap[k]===undefined)delete c[k];else c[k]=u.snap[k]});persist('cards',c);removeLog(u.t)}
-  queue=u.q;redo=new Set(u.redo);cur=c;shown=true;step=c.type==='steps'?lines(c).length:1;render();
+  queue=u.q;redo=new Set(u.redo);cur=c;shown=true;step=stp(c)?lines(c).length:1;render();
 }
 function fmtIvl(d){
   if(d<30)return d+' T';
   const n=d<365?d/30.4:d/365.25,u=d<365?'Mon':'J';
   return (n<10?Math.round(n*10)/10:Math.round(n)).toString().replace('.',',')+' '+u;
 }
+const stp=c=>c.type==='steps'||c.type==='outline'||c.type==='dispute';
+const lvl=x=>{const m=x.match(/^[ \t]*/)[0].replace(/\t/g,'  ').length;if(m)return Math.min(5,Math.floor(m/2));const t=x.trim();return /^[IVX]+\./.test(t)?0:/^\d+\./.test(t)?1:/^[a-z]\)/.test(t)?2:/^[a-z]{2}\)/.test(t)?3:0};
+const stepHTML=(c,L,n)=>c.type==='outline'?`<div class=ol2>${L.slice(0,n).map(x=>`<div style="padding-left:${lvl(x)*18}px">${fmt(x.trim())}</div>`).join('')}</div>`:c.type==='dispute'?`<div class=ds>${L.slice(0,n).map(x=>{const m=x.match(/^([^:]{2,40}):\s*(.*)$/);return m?`<b>${esc(m[1])}</b>${fmt(m[2])}`:fmt(x)}).join('')}</div>`:`<ol>${L.slice(0,n).map(x=>`<li>${fmt(x)}</li>`).join('')}</ol>`;
+function applyLook(){const s=settings(),r=document.documentElement.style;r.setProperty('--cf',s.font==='sans'?'system-ui,sans-serif':"Georgia,'Iowan Old Style','Times New Roman',serif");r.setProperty('--fs',(s.fs||19)+'px')}
+const isWeak=c=>c.reps>0&&(c.lapses||0)>=2;
+const weakList=()=>liveCards().filter(inFilter).filter(isWeak).sort((a,b)=>(b.lapses||0)-(a.lapses||0)).slice(0,30);
+const aheadList=()=>{const t=today();return liveCards().filter(inFilter).filter(c=>c.reps>0&&c.due>t).sort((a,b)=>a.due-b.due).slice(0,40)};
+function practice(list){if(!list.length)return;queue=list.slice();redo=new Set(list.map(c=>c.id));undo=[];next()}
+function practiceBtns(){const w=weakList().length,a=aheadList().length;
+ return (w||a?'<p class=mute>Übungsmodi ändern den Lernplan nicht.</p>':'')+(w?`<button class="b g" onclick="practice(weakList())">Nur Schwächen üben (${w})</button>`:'')+(a?`<button class="b g" onclick="practice(aheadList())">Intensiv: nicht fällige Karten (${a})</button>`:'')}
+function examInfo(){const s=settings();if(!s.exam)return null;const D=Math.ceil((Date.parse(s.exam+'T12:00:00')-Date.now())/864e5);if(!(D>=0))return null;
+ const n=liveCards().filter(c=>!c.reps).length,days=Math.max(1,D-7);return{D,n,need:Math.ceil(n/days),lim:s.newPerDay}}
+function examBox(){const e=examInfo();if(!e)return'';
+ return `<div class=box><b>Prüfung in ${e.D} Tagen</b><br>${e.n?`${e.n} Karten sind noch neu. Um sie bis 7 Tage vor der Prüfung zu lernen, brauchst du <b>${e.need} neue Karten pro Tag</b>${e.need>e.lim?` (dein Limit: ${e.lim}) <button class="b g s" onclick="setSetting('newPerDay',${e.need});render()">Limit übernehmen</button>`:'. Dein Limit reicht.'}`:'Alle Karten wurden schon gelernt.'}${e.D<=14?' Jetzt lohnt sich der Intensivmodus.':''}</div>`}
+function weakHTML(){
+ const t=today(),tg={},dk={};
+ S.logs.forEach(L=>{if(L.day<=t-90)return;(L.e||[]).forEach(x=>{if(x[3]!==2)return;const c=M.cards.get(x[1]);if(!c||c.deleted)return;const d=M.decks.get(c.deck),ok=x[2]>=2?1:0;
+  (c.tags||[]).forEach(k=>{const o=tg[k]||(tg[k]=[0,0]);o[0]++;o[1]+=ok});
+  if(d){const o=dk[d.name]||(dk[d.name]=[0,0]);o[0]++;o[1]+=ok}})});
+ const tbl=(m,fn)=>{const r=Object.entries(m).filter(([k,v])=>v[0]>=5).sort((a,b)=>a[1][1]/a[1][0]-b[1][1]/b[1][0]).slice(0,8);return r.length?`<table><tr><th>Name</th><th>Wdh.</th><th>Treffer</th></tr>${r.map(([k,v])=>`<tr><td>${esc(fn(k))}</td><td>${v[0]}</td><td>${Math.round(v[1]/v[0]*100)} %</td></tr>`).join('')}</table>`:'<p class=mute>Noch zu wenige Bewertungen (mindestens 5 pro Eintrag).</p>'};
+ return `<h3>Schwächste Tags (90 Tage)</h3>${tbl(tg,k=>k)}<h3>Schwächste Stapel (90 Tage)</h3>${tbl(dk,k=>k.replace(/::/g,' › '))}<p class=mute>${liveCards().filter(isWeak).length} Problemkarten (mindestens 2× „Nochmal“). Üben im Tab Lernen.</p>`}
 function learnView(){
   if(filter!=='all'&&!(M.decks.get(filter)&&!M.decks.get(filter).deleted))filter='all';
   const dc=deckCounts();
@@ -363,17 +390,17 @@ function learnView(){
   const tags=allTags(),topt=tags.length?`<select onchange="tagFilter=this.value;render()"><option value="">Alle Tags</option>${tags.map(t=>`<option ${tagFilter===t?'selected':''} value="${esc(t)}">${esc(t)}</option>`).join('')}</select>`:'';
   if(!cur){
     const s=dueSets(),n=s.rev.length+s.fresh.length,wait=s.freshTotal-s.fresh.length;
-    return `<select onchange="filter=this.value;render()">${opts}</select>${topt}
+    return `<select onchange="filter=this.value;render()">${opts}</select>${topt}${examBox()}
     <p>${n?`<b>${n}</b> Karten heute: ${s.rev.length} Wiederholungen, ${s.fresh.length} neue.`:'Heute ist nichts fällig.'}${wait?` <span class=mute>${wait} weitere neue warten wegen des Tageslimits (${settings().newPerDay}).</span>`:''}</p>
-    ${n?'<button class=b onclick=start()>Lernen starten</button>':''}${undo.length?'<button class="b g" onclick=undoLast()>↶ Letzte Bewertung rückgängig</button>':''}${backupNag()}`}
-  const L=cur.type==='steps'?lines(cur):[];
-  const done=cur.type==='steps'?step>=L.length:shown;
-  let h='<div class=card>';
+    ${n?'<button class=b onclick=start()>Lernen starten</button>':''}${practiceBtns()}${undo.length?'<button class="b g" onclick=undoLast()>↶ Letzte Bewertung rückgängig</button>':''}${backupNag()}`}
+  const L=stp(cur)?lines(cur):[];
+  const done=stp(cur)?step>=L.length:shown;
+  let h=`<div class=top><button class="b g s" onclick="cur=null;queue=[];render()">✕ Beenden</button><span class=mute>${queue.length+1} übrig</span></div><div class=card>`;
   if(cur.type==='cloze')h+=cloze(cur.front,shown)+(shown&&cur.back?`<hr>${fmt(cur.back)}`:'');
-  else if(cur.type==='steps')h+=fmt(cur.front)+`<ol>${L.slice(0,step).map(x=>`<li>${fmt(x)}</li>`).join('')}</ol>`;
+  else if(stp(cur))h+=fmt(cur.front)+stepHTML(cur,L,step);
   else h+=fmt(cur.front)+(shown?`<hr>${fmt(cur.back)}`:'');
   h+='</div>';
-  if(!done)h+=cur.type==='steps'
+  if(!done)h+=stp(cur)
     ?`<button class=b onclick="step++;render()">Nächster Punkt (${step}/${L.length})</button><button class="b g" onclick="step=${L.length};render()">Alle zeigen</button>`
     :`<button class=b onclick="shown=true;render()">Antwort zeigen</button>`;
   else if(redo.has(cur.id))h+=`<div class="rate two"><button class="b g" onclick=rate(1)>Nochmal</button><button class=b onclick=rate(3)>Gewusst</button></div><p class=mute>Wiederholung in dieser Sitzung, ändert den Lernplan nicht.</p>`;
@@ -415,7 +442,7 @@ function cardsView(){
   <input id=qs placeholder="Karten durchsuchen (Text oder Tag)" value="${esc(q)}" oninput="q=this.value;refreshList()">
   <div id=lst>${listHTML()}</div>`;
 }
-function hint(){const t=$('#ct').value;$('#h').textContent={basic:'Normale Karte: Frage vorn, Antwort hinten. Formatierung: **fett**, *kursiv*.',cloze:'Lücken so schreiben: Der {{c1::Vorsatz}} umfasst Wissen und Wollen. Rückseite ist optional.',steps:'Hinten: ein Prüfungsschritt pro Zeile. Beim Lernen deckst du sie nacheinander auf.'}[t]}
+function hint(){const t=$('#ct').value;$('#h').textContent={basic:'Normale Karte: Frage vorn, Antwort hinten. Formatierung: **fett**, *kursiv*.',cloze:'Lücken so schreiben: Der {{c1::Vorsatz}} umfasst Wissen und Wollen. Rückseite ist optional.',steps:'Hinten: ein Prüfungsschritt pro Zeile. Beim Lernen deckst du sie nacheinander auf.',outline:'Hinten: deine Gliederung, eine Zeile pro Punkt. Einrückung mit Leerzeichen; I., 1. und a) werden sonst automatisch eingerückt. Beim Lernen deckst du sie nacheinander auf.',dispute:'Hinten: ein Block pro Zeile, z. B. „Meinung A: …“. Der Teil vor dem Doppelpunkt wird als Überschrift gezeigt.'}[t];if(t==='dispute'&&!$('#cb').value)$('#cb').value='Streitstand: \nMeinung A: \nMeinung B: \nRechtsprechung: \nStellungnahme: '}
 function ensureDeck(name){
   const parts=name.split('::');let last=null;
   for(let i=1;i<=parts.length;i++){
@@ -477,7 +504,8 @@ function del(id){if(confirm('Karte löschen?')){const c=M.cards.get(id);c.delete
 
 /* ---------- Statistik ---------- */
 const bars=(vals,lab)=>{const mx=Math.max(1,...vals);return `<div class=bars>${vals.map((v,i)=>`<i style="height:${Math.round(v/mx*100)}%" title="${lab(i)}: ${v}"></i>`).join('')}</div>`};
-function statsView(){
+const statsView=()=>statsView0()+weakHTML();
+function statsView0(){
   const t=today(),per={};let n30=0,ok30=0,newToday=0;
   S.logs.forEach(L=>{
     const e=L.e||[];per[L.day]=(per[L.day]||0)+e.length;
@@ -527,6 +555,13 @@ function dataView(){
   <input type=number min=0 max=999 value=${s.newPerDay} onchange="setSetting('newPerDay',Math.max(0,parseInt(this.value)||0))">
   <p class=mute>Gewünschte Behaltensquote. Höher heißt mehr Wiederholungen. 90 % ist ein guter Start:</p>
   <select onchange="setSetting('retention',+this.value)">${[0.8,0.85,0.9,0.93,0.95].map(v=>`<option value=${v} ${s.retention===v?'selected':''}>${Math.round(v*100)} %</option>`).join('')}</select>
+  <h3>Prüfungsplan</h3>
+  <p class=mute>Datum deiner Prüfung (die App rechnet aus, wie viele neue Karten pro Tag nötig sind):</p>
+  <input type=date value="${s.exam||''}" onchange="setSetting('exam',this.value);render()">
+  <h3>Darstellung</h3>
+  <p class=mute>Kartenschrift und Größe:</p>
+  <select onchange="setSetting('font',this.value);render()"><option value=serif ${s.font!=='sans'?'selected':''}>Serifenschrift</option><option value=sans ${s.font==='sans'?'selected':''}>Serifenlos</option></select>
+  <select onchange="setSetting('fs',+this.value);render()">${[[17,'Klein'],[19,'Mittel'],[22,'Groß']].map(([v,n])=>`<option value=${v} ${(s.fs||19)===v?'selected':''}>${n}</option>`).join('')}</select>
   <h3>Backup</h3>
   <p>${d===null?'Noch kein Backup gemacht.':`Letztes Backup: vor ${d} Tag(en).`} Sichere regelmäßig eine Datei, zusätzlich zur Cloud. Sie enthält Karten, Lernverlauf und Einstellungen.</p>
   <button class=b onclick=exp()>Backup exportieren</button>
@@ -598,8 +633,8 @@ async function ankiOut(kind){
 
 function render(){
   if(!ready){$('#app').innerHTML='<p class=mute>Lädt …</p>';return}
-  $('#nav').innerHTML=[['learn','Lernen'],['cards','Karten'],['stats','Statistik'],['data','Daten']].map(([k,v])=>`<button class="${tab===k?'on':''}" onclick="tab='${k}';cur=null;render()">${v}</button>`).join('');
-  $('#app').innerHTML={learn:learnView,cards:cardsView,stats:statsView,data:dataView}[tab]()+`<p class=mute id=st>${esc(statusText())}</p>`;
+  applyLook();const focus=tab==='learn'&&!!cur;$('#nav').innerHTML=focus?'':[['learn','Lernen'],['cards','Karten'],['stats','Statistik'],['data','Daten']].map(([k,v])=>`<button class="${tab===k?'on':''}" onclick="tab='${k}';cur=null;render()">${v}</button>`).join('');
+  $('#app').innerHTML={learn:learnView,cards:cardsView,stats:statsView,data:dataView}[tab]()+(focus?'':`<p class=mute id=st>${esc(statusText())}</p>`);
   if(tab==='cards'&&liveDecks().length)hint();
 }
 render();boot();
