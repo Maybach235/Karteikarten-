@@ -30,19 +30,184 @@ textarea{min-height:90px}
 </style></head><body>
 <nav id="nav"></nav><main id="app"></main>
 <script>
+/* ===== EINRICHTUNG: Werte aus der Firebase-Konsole eintragen (Projekteinstellungen > Deine Apps > Web-App) ===== */
+const CFG={apiKey:"AIzaSyC-ByAB-rpFQwl7wEHsPlUjZF1uKwJM1zk",authDomain:"karteikarten-53cce.firebaseapp.com",projectId:"karteikarten-53cce",appId:"1:5266674852:web:1149936854941233558231"};
+/* ================================================================================================================ */
+
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const today=()=>Math.floor((Date.now()-new Date().getTimezoneOffset()*6e4)/864e5);
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const ls=(k,v)=>{try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch{return null}};
 const TYPES={basic:'Frage / Antwort',cloze:'Lückentext',steps:'Stufenweise aufdecken'};
-let S={decks:[],cards:[]},tab='learn',filter='all',queue=[],cur=null,shown=false,step=1,editId=null;
+const G='https://www.gstatic.com/firebasejs/10.14.1/';
 
-/* Speicher: der ganze Zustand liegt als ein Objekt in IndexedDB */
-const idb=new Promise((ok,no)=>{const r=indexedDB.open('karten',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});
-async function load(){const db=await idb;return new Promise(ok=>{const q=db.transaction('kv').objectStore('kv').get('state');q.onsuccess=()=>ok(q.result);q.onerror=()=>ok(null)})}
-async function save(){const db=await idb;db.transaction('kv','readwrite').objectStore('kv').put(S,'state')}
+let S={decks:[],cards:[]};                  /* Listen zur Anzeige */
+const M={cards:new Map(),decks:new Map()};  /* Stand im Speicher: id -> Objekt */
+let tab='learn',filter='all',queue=[],cur=null,shown=false,step=1,editId=null,q='';
+let ready=false,A,D,auth,db,user=null,fbErr='',syncMsg='',syncing=false,lastSrv={},kickT=null;
 
-/* Wiederholungs-Algorithmus (SM-2-Variante). r: 0 Nochmal, 1 Schwer, 2 Gut, 3 Leicht */
+/* ---------- Lokale Datenbank: jede Karte ist ein eigener Datensatz ---------- */
+const dbp=new Promise((ok,no)=>{
+  const r=indexedDB.open('karten2',1);
+  r.onupgradeneeded=()=>{const d=r.result;d.createObjectStore('cards',{keyPath:'id'});d.createObjectStore('decks',{keyPath:'id'});d.createObjectStore('meta')};
+  r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error);
+});
+const tx=async(st,mode,fn)=>{const d=await dbp;return new Promise((ok,no)=>{const t=d.transaction(st,mode);const out=fn(t);t.oncomplete=()=>ok(out&&out.result);t.onerror=()=>no(t.error);t.onabort=()=>no(t.error)})};
+const idbAll=st=>tx(st,'readonly',t=>t.objectStore(st).getAll());
+const idbGet=(st,k)=>tx(st,'readonly',t=>t.objectStore(st).get(k));
+const idbPut=(st,v,k)=>tx(st,'readwrite',t=>k===undefined?t.objectStore(st).put(v):t.objectStore(st).put(v,k));
+const idbPutMany=(st,arr)=>tx(st,'readwrite',t=>{const o=t.objectStore(st);arr.forEach(v=>o.put(v))});
+
+function rebuild(){S.cards=[...M.cards.values()];S.decks=[...M.decks.values()].sort((a,b)=>a.name.localeCompare(b.name,'de'))}
+function setLocal(kind,o){M[kind].set(o.id,o);rebuild()}
+/* Jede lokale Änderung: Zeitstempel setzen, als „noch nicht hochgeladen“ markieren, speichern, Sync anstoßen */
+function persist(kind,o){o.updatedAt=Date.now();o.dirty=1;idbPut(kind,o).catch(e=>alert('Lokales Speichern fehlgeschlagen: '+e));kick()}
+
+/* Einmalig: Karten aus der alten, rein lokalen Version (Datenbank „karten“) übernehmen */
+function readOld(){return new Promise(ok=>{
+  const r=indexedDB.open('karten',1);
+  r.onupgradeneeded=()=>r.result.createObjectStore('kv');
+  r.onerror=()=>ok(null);
+  r.onsuccess=()=>{const d=r.result;try{const g=d.transaction('kv').objectStore('kv').get('state');g.onsuccess=()=>{d.close();ok(g.result)};g.onerror=()=>{d.close();ok(null)}}catch{d.close();ok(null)}};
+})}
+async function migrate(){
+  const old=await readOld().catch(()=>null);
+  if(old&&((old.cards||[]).length||(old.decks||[]).length)){
+    const t=Date.now();
+    (old.decks||[]).forEach(d=>M.decks.set(d.id,{...d,updatedAt:t,dirty:1}));
+    (old.cards||[]).forEach(c=>M.cards.set(c.id,{...c,updatedAt:t,dirty:1}));
+    await idbPutMany('decks',[...M.decks.values()]);await idbPutMany('cards',[...M.cards.values()]);
+  }
+  await idbPut('meta',1,'migrated');
+}
+async function boot(){
+  try{
+    const [cs,ds]=await Promise.all([idbAll('cards'),idbAll('decks')]);
+    cs.forEach(c=>M.cards.set(c.id,c));ds.forEach(d=>M.decks.set(d.id,d));
+    lastSrv=(await idbGet('meta','lastSrv'))||{};
+    if(!(await idbGet('meta','migrated')))await migrate();
+    rebuild();
+  }catch(e){alert('Lokale Datenbank nicht verfügbar: '+e)}
+  ready=true;render();fbInit();
+}
+
+/* ---------- Sync mit Firestore: es werden nur Änderungen übertragen ---------- */
+const wt=(p,ms=25000)=>Promise.race([p,new Promise((_,no)=>setTimeout(()=>no(new Error('Zeitüberschreitung (offline?)')),ms))]);
+const ref=(k,id)=>D.doc(db,'users',user.uid,k,id);
+const dirtyCount=()=>S.cards.filter(c=>c.dirty).length+S.decks.filter(d=>d.dirty).length;
+const statusText=()=>!CFG.apiKey?'Nur lokal gespeichert (Cloud nicht eingerichtet).':fbErr?fbErr:!user?'Nicht angemeldet: nur lokal gespeichert.':(syncMsg||'Bereit.');
+function ui(full){const s=$('#st');if(s)s.textContent=statusText();if(full&&tab==='data')render()}
+
+async function fbInit(){
+  if(!CFG.apiKey)return;
+  try{
+    const [app,au,fs]=await Promise.all([import(G+'firebase-app.js'),import(G+'firebase-auth.js'),import(G+'firebase-firestore.js')]);
+    A=au;D=fs;
+    const fa=app.initializeApp(CFG);
+    auth=A.getAuth(fa);db=D.getFirestore(fa);
+    A.onAuthStateChanged(auth,async u=>{
+      user=u;syncMsg='';
+      if(u){
+        const su=await idbGet('meta','uid');
+        if(su&&su!==u.uid){
+          if(!confirm('Dieses Gerät enthält Karten eines anderen Kontos. In dieses Konto übernehmen?')){await A.signOut(auth);return}
+          lastSrv={};await idbPut('meta',{},'lastSrv');
+          [...S.cards,...S.decks].forEach(x=>x.dirty=1);
+          await idbPutMany('cards',S.cards);await idbPutMany('decks',S.decks);
+        }
+        if(su!==u.uid)await idbPut('meta',u.uid,'uid');
+        render();sync();
+      }else render();
+    });
+  }catch(e){fbErr='Cloud-Skripte konnten nicht geladen werden (beim ersten Start ist Internet nötig). Lokal funktioniert alles.';render()}
+}
+async function login(create){
+  const e=$('#em').value.trim(),p=$('#pw').value;
+  if(!e||p.length<6)return alert('E-Mail und Passwort (mindestens 6 Zeichen) eingeben.');
+  try{await(create?A.createUserWithEmailAndPassword(auth,e,p):A.signInWithEmailAndPassword(auth,e,p))}
+  catch(x){alert('Anmeldung fehlgeschlagen ('+x.code+').')}
+}
+async function resetPw(){
+  const e=$('#em').value.trim();if(!e)return alert('Bitte zuerst die E-Mail-Adresse eintragen.');
+  try{await A.sendPasswordResetEmail(auth,e);alert('E-Mail zum Zurücksetzen wurde gesendet (auch im Spam-Ordner nachsehen).')}
+  catch(x){alert('Fehlgeschlagen ('+x.code+').')}
+}
+const logout=()=>A.signOut(auth);
+
+/* Datensatz aus der Cloud mit dem lokalen zusammenführen: der mit dem neueren Änderungszeitstempel gewinnt */
+function mergeIn(kind,id,r){
+  const l=M[kind].get(id);
+  r={...r,id};delete r.srv;
+  if(!l){M[kind].set(id,r);return r}
+  if((l.updatedAt||0)>(r.updatedAt||0)){l.dirty=1;return null}
+  Object.keys(l).forEach(k=>delete l[k]);Object.assign(l,r);
+  return l;
+}
+async function pullKind(kind){
+  const col=D.collection(db,'users',user.uid,kind);
+  const prev=lastSrv[kind]||null;
+  let max=prev,after=null,n=0,changed=false;
+  for(;;){
+    /* 2 Minuten Überlappung als Sicherheitspuffer; doppelt Gelesenes ist wegen des Zeitstempelvergleichs harmlos */
+    const c=prev?[D.where('srv','>',new D.Timestamp(prev[0]-120,prev[1])),D.orderBy('srv')]:[D.orderBy(D.documentId())];
+    if(after)c.push(D.startAfter(after));
+    c.push(D.limit(500));
+    const snap=await wt(D.getDocs(D.query(col,...c)));
+    const touched=[];
+    snap.docs.forEach(d=>{
+      const x=d.data(),s=x.srv;
+      if(s&&(!max||s.seconds>max[0]||(s.seconds===max[0]&&s.nanoseconds>max[1])))max=[s.seconds,s.nanoseconds];
+      const o=mergeIn(kind,d.id,x);if(o){touched.push(o);changed=true}
+    });
+    if(touched.length)await idbPutMany(kind,touched);
+    n+=snap.docs.length;
+    if(n>500){syncMsg=`Lade ${kind==='cards'?'Karten':'Stapel'} … ${n}`;ui()}
+    if(snap.docs.length<500)break;
+    after=snap.docs[snap.docs.length-1];
+  }
+  if(max&&(!prev||max[0]!==prev[0]||max[1]!==prev[1])){lastSrv[kind]=max;await idbPut('meta',lastSrv,'lastSrv')}
+  return changed;
+}
+const wire=x=>{const o={...x};delete o.dirty;delete o.id;o.srv=D.serverTimestamp();return Object.fromEntries(Object.entries(o).filter(([,v])=>v!==undefined))};
+async function push(kind){
+  const dirty=S[kind].filter(x=>x.dirty);
+  for(let i=0;i<dirty.length;i+=400){
+    const chunk=dirty.slice(i,i+400),sent=chunk.map(x=>[x,x.updatedAt]);
+    const b=D.writeBatch(db);chunk.forEach(x=>b.set(ref(kind,x.id),wire(x)));
+    await wt(b.commit());
+    const ok=[];sent.forEach(([x,u])=>{if(x.updatedAt===u){delete x.dirty;ok.push(x)}});
+    await idbPutMany(kind,ok);
+    syncMsg=`Lade hoch … ${Math.min(i+400,dirty.length)}/${dirty.length}`;ui();
+  }
+}
+async function sync(){
+  if(!user||!db||syncing)return;
+  if(!navigator.onLine){syncMsg='Offline. Änderungen werden später hochgeladen.';ui();return}
+  syncing=true;syncMsg='Synchronisiere …';ui();
+  try{
+    const a=await pullKind('decks'),b=await pullKind('cards');
+    if(a||b){rebuild();changed()}
+    await push('decks');await push('cards');
+    syncMsg='Synchronisiert um '+new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})+'.';
+    syncing=false;ui(true);
+    if(dirtyCount())kick();
+  }catch(e){syncing=false;syncMsg='Sync fehlgeschlagen: '+(e.code||e.message)+'. Nächster Versuch automatisch.';ui(true)}
+}
+function kick(){clearTimeout(kickT);kickT=setTimeout(sync,4000)}
+addEventListener('online',sync);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)sync()});
+setInterval(()=>{if(!document.hidden)sync()},120000);
+
+/* Nach Änderungen von anderen Geräten nur dort neu zeichnen, wo es nicht stört */
+function changed(){
+  if(tab==='learn'&&!cur)render();
+  else if(tab==='data')render();
+  else if(tab==='cards'){const s=$('#cd');if(!s||s.options.length!==S.decks.length)render();else refreshList()}
+}
+
+/* ---------- Lernen (unverändert gegenüber deiner Version) ---------- */
+/* r: 0 Nochmal, 1 Schwer, 2 Gut, 3 Leicht (SM-2-Variante) */
 function review(c,r){
   if(r===0){c.interval=0;c.ease=Math.max(1.3,c.ease-.2);c.due=today();}
   else{
@@ -52,9 +217,10 @@ function review(c,r){
     c.ease=Math.max(1.3,c.ease+[-.15,0,.15][r-1]);
     c.due=today()+c.interval;
   }
-  c.reps++;save();
+  c.reps++;
+  persist('cards',c);
 }
-const dueCards=()=>S.cards.filter(c=>c.due<=today()&&(filter==='all'||c.deck===filter));
+const dueCards=()=>S.cards.filter(c=>!c.deleted&&c.due<=today()&&(filter==='all'||c.deck===filter));
 const lines=c=>c.back.split('\n').filter(x=>x.trim());
 const cloze=(t,show)=>esc(t).replace(/\{\{c\d+::(.*?)\}\}/g,(m,a)=>show?`<b class=hit>${a}</b>`:'<span class=gap>[…]</span>');
 function next(){cur=queue.shift()||null;shown=false;step=1;render()}
@@ -66,7 +232,7 @@ function learnView(){
   if(!cur){const n=dueCards().length;
     return `<select onchange="filter=this.value;render()">${opts}</select>
     <p>${n?`<b>${n}</b> Karten fällig.`:'Heute ist nichts fällig.'}</p>
-    ${n?'<button class=b onclick=start()>Lernen starten</button>':''}`}
+    ${n?'<button class=b onclick=start()>Lernen starten</button>':''}${backupNag()}`}
   const L=cur.type==='steps'?lines(cur):[];
   const done=cur.type==='steps'?step>=L.length:shown;
   let h='<div class=card>';
@@ -81,8 +247,18 @@ function learnView(){
   return h+`<p class=mute>Noch ${queue.length} danach</p>`;
 }
 
+/* ---------- Karten verwalten ---------- */
+const liveCount=()=>S.cards.filter(c=>!c.deleted).length;
+function listHTML(){
+  const t=q.trim().toLowerCase();
+  const all=S.cards.filter(c=>!c.deleted&&(!t||c.front.toLowerCase().includes(t)||(c.back||'').toLowerCase().includes(t)))
+    .sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
+  return all.slice(0,100).map(c=>`<div class=row><span onclick="editId='${c.id}';render();scrollTo(0,0)">${esc(c.front.slice(0,70))}</span><button class="b g" onclick="del('${c.id}')">Löschen</button></div>`).join('')
+    +(all.length>100?`<p class=mute>${all.length-100} weitere Karten. Mit der Suche eingrenzen.</p>`:'');
+}
+function refreshList(){const l=$('#lst'),n=$('#cnt');if(l)l.innerHTML=listHTML();if(n)n.textContent=liveCount()}
 function cardsView(){
-  const e=S.cards.find(c=>c.id===editId)||{type:'basic',front:'',back:'',deck:filter!=='all'?filter:S.decks[0]?.id};
+  const e=M.cards.get(editId)||{type:'basic',front:'',back:'',deck:filter!=='all'?filter:S.decks[0]?.id};
   const dk=`<input id=dn placeholder="Neuer Stapel, z. B. Strafrecht AT"><button class="b g" onclick=addDeck()>Stapel anlegen</button>`;
   if(!S.decks.length)return `<p>Lege zuerst einen Stapel an.</p>${dk}`;
   return `${dk}<hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
@@ -92,33 +268,108 @@ function cardsView(){
   <textarea id=cb placeholder="Rückseite / Punkte">${esc(e.back)}</textarea>
   <p class=mute id=h></p>
   <button class=b onclick=saveCard()>${editId?'Änderung speichern':'Karte speichern'}</button>${editId?'<button class="b g" onclick="editId=null;render()">Abbrechen</button>':''}
-  <h3>Karten (${S.cards.length})</h3>
-  ${S.cards.slice().reverse().map(c=>`<div class=row><span onclick="editId='${c.id}';render();scrollTo(0,0)">${esc(c.front.slice(0,70))}</span><button class="b g" onclick="del('${c.id}')">Löschen</button></div>`).join('')}`;
+  <h3>Karten (<span id=cnt>${liveCount()}</span>)</h3>
+  <input id=qs placeholder="Karten durchsuchen" value="${esc(q)}" oninput="q=this.value;refreshList()">
+  <div id=lst>${listHTML()}</div>`;
 }
 function hint(){const t=$('#ct').value;$('#h').textContent={basic:'Normale Karte: Frage vorn, Antwort hinten.',cloze:'Lücken so schreiben: Der {{c1::Vorsatz}} umfasst Wissen und Wollen. Rückseite ist optional.',steps:'Hinten: ein Prüfungsschritt pro Zeile. Beim Lernen deckst du sie nacheinander auf.'}[t]}
-function addDeck(){const n=$('#dn').value.trim();if(!n)return;S.decks.push({id:uid(),name:n});save();render()}
+function addDeck(){const n=$('#dn').value.trim();if(!n)return;const d={id:uid(),name:n};setLocal('decks',d);persist('decks',d);render()}
 function saveCard(){
   const f=$('#cf').value.trim(),b=$('#cb').value.trim(),t=$('#ct').value;
   if(!f||(t!=='cloze'&&!b))return alert('Bitte Vorder- und Rückseite ausfüllen.');
   if(t==='cloze'&&!/\{\{c\d+::/.test(f))return alert('Mindestens eine Lücke nötig: {{c1::Text}}');
-  if(editId){Object.assign(S.cards.find(c=>c.id===editId),{deck:$('#cd').value,type:t,front:f,back:b});editId=null}
-  else S.cards.push({id:uid(),deck:$('#cd').value,type:t,front:f,back:b,interval:0,ease:2.5,due:today(),reps:0});
-  save();render()}
-function del(id){if(confirm('Karte löschen?')){S.cards=S.cards.filter(c=>c.id!==id);save();render()}}
+  if(editId){const c=M.cards.get(editId);Object.assign(c,{deck:$('#cd').value,type:t,front:f,back:b});persist('cards',c);editId=null}
+  else{const c={id:uid(),deck:$('#cd').value,type:t,front:f,back:b,interval:0,ease:2.5,due:today(),reps:0};setLocal('cards',c);persist('cards',c)}
+  render()}
+/* Löschen = Markierung, damit das Löschen auch auf den anderen Geräten ankommt */
+function del(id){if(confirm('Karte löschen?')){const c=M.cards.get(id);c.deleted=1;persist('cards',c);refreshList()}}
 
-function dataView(){return `<p>Sichere deine Karten regelmäßig als Datei.</p>
+/* ---------- Daten: Konto, Backup, Wiederherstellung, Anki-Export ---------- */
+const backupDays=()=>{const l=ls('lastBackup');return l?Math.floor((Date.now()-new Date(l))/864e5):null};
+const backupNag=()=>{const d=backupDays();return liveCount()&&(d===null||d>30)?'<p class=mute>Tipp: Unter „Daten“ eine Backup-Datei sichern.</p>':''};
+function accountHTML(){
+  if(!CFG.apiKey)return `<p><b>Cloud-Sync ist noch nicht eingerichtet.</b> Trage die Firebase-Konfiguration oben in index.html ein. Bis dahin liegen deine Karten nur auf diesem Gerät.</p>`;
+  if(fbErr)return `<p>${esc(fbErr)}</p>`;
+  if(!auth)return '<p class=mute>Cloud lädt …</p>';
+  if(!user)return `<p>Melde dich an, damit alle Geräte denselben Stand haben. Beim ersten Mal „Konto erstellen“, auf den anderen Geräten „Anmelden“ mit denselben Daten.</p>
+    <input id=em type=email autocomplete=username placeholder="E-Mail">
+    <input id=pw type=password autocomplete=current-password placeholder="Passwort (mind. 6 Zeichen)">
+    <button class=b onclick=login(false)>Anmelden</button><button class="b g" onclick=login(true)>Konto erstellen</button>
+    <button class="b g" onclick=resetPw()>Passwort vergessen</button>`;
+  const n=dirtyCount();
+  return `<p class=mute>Angemeldet als ${esc(user.email)}${n?` · ${n} Änderungen noch nicht hochgeladen`:' · alles hochgeladen'}</p>
+    <button class=b onclick=sync()>Jetzt synchronisieren</button><button class="b g" onclick=logout()>Abmelden</button>
+    <p class=mute>Beim Abmelden bleiben alle Karten auf diesem Gerät erhalten.</p>`;
+}
+function dataView(){
+  const d=backupDays();
+  return `<p>${liveCount()} Karten in ${S.decks.length} Stapeln.</p>
+  <h3>Synchronisation</h3>${accountHTML()}
+  <h3>Backup</h3>
+  <p>${d===null?'Noch kein Backup gemacht.':`Letztes Backup: vor ${d} Tag(en).`} Sichere regelmäßig eine Datei, zusätzlich zur Cloud.</p>
   <button class=b onclick=exp()>Backup exportieren</button>
-  <p><label class="b g" style="display:inline-block">Backup importieren<input type=file accept=.json hidden onchange="imp(this.files[0])"></label></p>
-  <p class=mute>Beim Import wird alles Bestehende ersetzt.</p>`}
-function exp(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S)],{type:'application/json'}));a.download='karten-'+new Date().toISOString().slice(0,10)+'.json';a.click()}
-function imp(f){if(!f||!confirm('Bestehende Daten ersetzen?'))return;f.text().then(t=>{const d=JSON.parse(t);if(!d.decks||!d.cards)return alert('Ungültige Datei.');S=d;save();render()})}
+  <p><label class="b g" style="display:inline-block">Backup wiederherstellen<input type=file accept=.json hidden onchange="imp(this.files[0]);this.value=''"></label></p>
+  <p class=mute>Beim Wiederherstellen werden Karten mit gleicher ID überschrieben (auch gelöschte kommen zurück), alle anderen bleiben unverändert.</p>
+  <h3>Export für Anki</h3>
+  <p class=mute>Textdateien für Anki (Datei → Importieren). So bist du nie auf diese App angewiesen.</p>
+  <button class="b g" onclick="ankiOut('basic')">Frage/Antwort + Stufenkarten</button>
+  <button class="b g" onclick="ankiOut('cloze')">Lückentext-Karten</button>`;
+}
+async function saveFile(name,text,type){
+  const blob=new Blob([text],{type});
+  try{
+    const f=new File([blob],name,{type});
+    if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f]});return true}
+    throw 0;
+  }catch(e){
+    if(e&&e.name==='AbortError')return false;
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();return true;
+  }
+}
+const clean=x=>{const o={...x};delete o.dirty;return o};
+const backupObj=()=>({version:3,exported:new Date().toISOString(),decks:S.decks.map(clean),cards:S.cards.filter(c=>!c.deleted).map(clean)});
+async function exp(){
+  if(await saveFile('karten-'+new Date().toISOString().slice(0,10)+'.json',JSON.stringify(backupObj()),'application/json')){ls('lastBackup',new Date().toISOString());render()}
+}
+/* Prüft Datensätze, damit eine kaputte Datei nichts zerstört */
+const okDeck=d=>d&&typeof d.id==='string'&&d.id&&typeof d.name==='string';
+const okCard=c=>c&&typeof c.id==='string'&&c.id&&typeof c.front==='string'&&typeof c.back==='string'&&TYPES[c.type||'basic'];
+async function imp(f){
+  if(!f)return;
+  let d;try{d=JSON.parse(await f.text())}catch{return alert('Ungültige Datei.')}
+  if(!d||!Array.isArray(d.decks)||!Array.isArray(d.cards))return alert('Ungültige Datei.');
+  const ds=d.decks.filter(okDeck),cs=d.cards.filter(okCard),skipped=d.decks.length+d.cards.length-ds.length-cs.length;
+  if(!confirm(`${cs.length} Karten und ${ds.length} Stapel wiederherstellen?${skipped?`\n${skipped} unbrauchbare Einträge werden übersprungen.`:''}`))return;
+  const t=Date.now(),dl=[],cl=[];
+  ds.forEach(x=>{const o={...x,updatedAt:t,dirty:1};M.decks.set(o.id,o);dl.push(o)});
+  cs.forEach(x=>{const o={type:'basic',interval:0,ease:2.5,due:today(),reps:0,...x,updatedAt:t,dirty:1};delete o.deleted;M.cards.set(o.id,o);cl.push(o)});
+  rebuild();await idbPutMany('decks',dl);await idbPutMany('cards',cl);kick();
+  alert('Wiederherstellung abgeschlossen.');render();
+}
+/* Anki-Textimport: Tab-getrennt, HTML erlaubt. Lückentext-Syntax {{c1::…}} ist identisch zu Anki. */
+const ah=s=>esc(s).replace(/\t/g,' ').replace(/\r?\n/g,'<br>');
+function ankiText(kind){
+  const rows=S.cards.filter(c=>!c.deleted&&(kind==='cloze')===(c.type==='cloze'));
+  const lines=[ '#separator:tab','#html:true','#notetype:'+(kind==='cloze'?'Cloze':'Basic'),'#tags column:3','#deck column:4' ];
+  rows.forEach(c=>{
+    const dn=(M.decks.get(c.deck)||{}).name||'Karten';
+    const back=c.type==='steps'?'<ol>'+c.back.split('\n').filter(x=>x.trim()).map(x=>'<li>'+esc(x.trim())+'</li>').join('')+'</ol>':ah(c.back);
+    lines.push([ah(c.front),back,dn.replace(/\s+/g,'_'),dn.replace(/\t/g,' ')].join('\t'));
+  });
+  return{text:lines.join('\n')+'\n',n:rows.length};
+}
+async function ankiOut(kind){
+  const r=ankiText(kind);if(!r.n)return alert('Keine Karten dieser Art vorhanden.');
+  await saveFile(kind==='cloze'?'anki-luecken.txt':'anki-karten.txt',r.text,'text/plain');
+}
 
 function render(){
+  if(!ready){$('#app').innerHTML='<p class=mute>Lädt …</p>';return}
   $('#nav').innerHTML=[['learn','Lernen'],['cards','Karten'],['data','Daten']].map(([k,v])=>`<button class="${tab===k?'on':''}" onclick="tab='${k}';cur=null;render()">${v}</button>`).join('');
-  $('#app').innerHTML={learn:learnView,cards:cardsView,data:dataView}[tab]();
-  if(tab==='cards')hint();
+  $('#app').innerHTML={learn:learnView,cards:cardsView,data:dataView}[tab]()+`<p class=mute id=st>${esc(statusText())}</p>`;
+  if(tab==='cards'&&S.decks.length)hint();
 }
-load().then(d=>{if(d)S=d;render()});
+render();boot();
 if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();
 if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
 </script></body></html>
