@@ -3,7 +3,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Karten</title>
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Karten">
 <meta name="theme-color" content="#1f5f5b">
 <style>
 :root{--bg:#f2f4f6;--surf:#fff;--ink:#1c2630;--mute:#64707c;--line:#d6dce1;--acc:#1f5f5b;--accfg:#fff;--gap:#dbe9e7;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -16,41 +18,101 @@ nav button.on{border-color:var(--acc);color:var(--ink);font-weight:600}
 button,select,input,textarea{font:inherit;color:inherit}
 .b{background:var(--acc);color:var(--accfg);border:0;border-radius:8px;padding:12px 16px;margin:4px 4px 4px 0;cursor:pointer}
 .b.g{background:none;color:var(--ink);border:1px solid var(--line)}
+.b.s{padding:6px 10px;margin:0}
 .card{background:var(--surf);border:1px solid var(--line);border-radius:12px;padding:20px;margin:12px 0;font:19px/1.6 Georgia,'Times New Roman',serif;white-space:pre-wrap}
 .card ol{margin:12px 0 0;padding-left:22px}.card li{margin:6px 0}
 .card hr{border:0;border-top:1px solid var(--line);margin:14px 0}
 .gap{background:var(--gap);color:var(--acc);padding:0 6px;border-radius:4px}
 .hit{color:var(--acc)}
 .mute{color:var(--mute);font-size:14px}
-.rate{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.rate .b{margin:0;padding:12px 4px}
+.rate{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.rate.two{grid-template-columns:repeat(2,1fr)}
+.rate .b{margin:0;padding:10px 2px;line-height:1.25}.rate small{display:block;font-size:12px;opacity:.8}
 input,select,textarea{width:100%;background:var(--surf);border:1px solid var(--line);border-radius:8px;padding:10px;margin:4px 0 10px}
 textarea{min-height:90px}
 .row{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding:9px 0;gap:10px}
-.row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.row>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.row small{display:block;color:var(--mute);font-size:12px;overflow:hidden;text-overflow:ellipsis}
+.row .acts{display:flex;gap:6px;flex:none}
+details{margin:10px 0}summary{cursor:pointer;font-weight:600;padding:6px 0}
+.banner{background:var(--acc);color:var(--accfg);padding:10px 14px;border-radius:8px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.banner[hidden]{display:none}.banner button{background:var(--accfg);color:var(--acc);border:0;border-radius:6px;padding:6px 12px}
+.bars{display:flex;align-items:flex-end;gap:2px;height:80px;margin:6px 0 2px}
+.bars i{flex:1;background:var(--acc);min-height:2px;border-radius:2px 2px 0 0}
+.axis{display:flex;justify-content:space-between;color:var(--mute);font-size:12px;margin-bottom:12px}
+.kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0 14px}
+.kpi div{background:var(--surf);border:1px solid var(--line);border-radius:10px;padding:10px}
+.kpi b{display:block;font-size:22px}.kpi span{color:var(--mute);font-size:12px}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:right;padding:6px 4px;border-bottom:1px solid var(--line)}th:first-child,td:first-child{text-align:left}
 </style></head><body>
+<div id="upd" class="banner" hidden><span>Neue Version verfügbar.</span><button onclick="location.reload()">Neu laden</button></div>
 <nav id="nav"></nav><main id="app"></main>
+<script src="config.js"></script>
 <script>
-/* ===== EINRICHTUNG: Werte aus der Firebase-Konsole eintragen (Projekteinstellungen > Deine Apps > Web-App) ===== */
-const CFG={apiKey:"AIzaSyC-ByAB-rpFQwl7wEHsPlUjZF1uKwJM1zk",authDomain:"karteikarten-53cce.firebaseapp.com",projectId:"karteikarten-53cce",appId:"1:5266674852:web:1149936854941233558231"};
-/* ================================================================================================================ */
+/* Die Firebase-Zugangsdaten stehen in der Datei config.js (einmal anlegen, bleibt bei Updates unberührt). */
+const CFG=window.CFG||{};
+const APP_V='2.0';
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const today=()=>Math.floor((Date.now()-new Date().getTimezoneOffset()*6e4)/864e5);
+/* Der Lerntag wechselt um 4 Uhr nachts (wie bei Anki), damit späte Lerneinheiten zum „heutigen“ Tag zählen */
+const ROLL=4;
+const today=()=>Math.floor((Date.now()-new Date().getTimezoneOffset()*6e4-ROLL*36e5)/864e5);
+const dayStr=d=>new Date(d*864e5).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',timeZone:'UTC'});
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 const ls=(k,v)=>{try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch{return null}};
+const DEV=ls('dev')||(()=>{const v=uid();ls('dev',v);return v})();
 const TYPES={basic:'Frage / Antwort',cloze:'Lückentext',steps:'Stufenweise aufdecken'};
+const KINDS=['decks','cards','logs','settings'];
 const G='https://www.gstatic.com/firebasejs/10.14.1/';
 
-let S={decks:[],cards:[]};                  /* Listen zur Anzeige */
-const M={cards:new Map(),decks:new Map()};  /* Stand im Speicher: id -> Objekt */
-let tab='learn',filter='all',queue=[],cur=null,shown=false,step=1,editId=null,q='';
+let S={decks:[],cards:[],logs:[],settings:[]};   /* Listen zur Anzeige */
+const M={};KINDS.forEach(k=>M[k]=new Map());     /* Stand im Speicher: id -> Objekt */
+let tab='learn',filter='all',tagFilter='',queue=[],cur=null,shown=false,step=1,editId=null,q='';
+let undo=[],redo=new Set();
 let ready=false,A,D,auth,db,user=null,fbErr='',syncMsg='',syncing=false,lastSrv={},kickT=null;
+
+/* ---------- Lernalgorithmus FSRS-6 (Tagesversion). Formeln und Standardwerte wie in der Referenzbibliothek ts-fsrs ---------- */
+const FW=[0.212,1.2931,2.3065,8.2956,6.4133,0.8334,3.0194,1e-3,1.8722,0.1666,0.796,1.4835,0.0614,0.2629,1.6483,0.6014,1.8729,0.5425,0.0912,0.0658,0.1542];
+const r8=x=>Math.round(x*1e8)/1e8;
+const cl=(x,a,b)=>Math.min(Math.max(x,a),b);
+const DEC=-FW[20],FAC=r8(Math.exp(Math.log(0.9)/DEC)-1);
+const retr=(t,s)=>r8(Math.pow(1+FAC*t/s,DEC));
+const d0=g=>r8(FW[4]-Math.exp((g-1)*FW[5])+1);
+function fsNext(m,t,g){
+  if(!m)return{d:cl(d0(g),1,10),s:Math.max(FW[g-1],.1)};
+  const s=m.s,d=m.d,r=retr(t,s);let ns;
+  if(g===1){
+    const sf=r8(cl(FW[11]*Math.pow(d,-FW[12])*(Math.pow(s+1,FW[13])-1)*Math.exp((1-r)*FW[14]),1e-3,36500));
+    ns=cl(r8(s),1e-3,sf);
+  }else{
+    ns=r8(cl(s*(1+Math.exp(FW[8])*(11-d)*Math.pow(s,-FW[9])*(Math.exp((1-r)*FW[10])-1)*(g===2?FW[15]:1)*(g===4?FW[16]:1)),1e-3,36500));
+  }
+  const nd=cl(r8(FW[7]*d0(4)+(1-FW[7])*(d+r8(-FW[6]*(g-3)*(10-d)/9))),1,10);
+  return{d:nd,s:ns};
+}
+function fsPlan(m,t,ret,maxI=36500){
+  const mod=r8((Math.pow(ret,1/DEC)-1)/FAC);
+  const out=[1,2,3,4].map(g=>{const n=fsNext(m,t,g);return{g,s:n.s,d:n.d,ivl:Math.min(Math.max(1,Math.round(n.s*mod)),maxI)}});
+  let [a,h,g,e]=out.map(o=>o.ivl);
+  a=Math.min(a,h);h=Math.max(h,a+1);g=Math.max(g,h+1);e=Math.max(e,g+1);
+  [a,h,g,e].forEach((v,i)=>out[i].ivl=v);
+  return out;
+}
+/* Gedächtniszustand einer Karte. Alte Karten aus der SM-2-Zeit werden dabei näherungsweise umgerechnet. */
+function mem(c){
+  if(!c.reps)return null;
+  if(c.st>0)return{s:c.st,d:c.df,lr:c.lr};
+  const iv=Math.max(1,c.interval||1);
+  const ease=c.ease||2.5;
+  return{s:iv,d:cl(10-(ease-1.3)*(9/1.9),1,10),lr:(c.due||today())-(c.interval||0)};
+}
+const settings=()=>M.settings.get('main')||{id:'main',newPerDay:20,retention:0.9};
+function plan(c){const m=mem(c);return fsPlan(m,m?Math.max(0,today()-m.lr):0,settings().retention)}
 
 /* ---------- Lokale Datenbank: jede Karte ist ein eigener Datensatz ---------- */
 const dbp=new Promise((ok,no)=>{
-  const r=indexedDB.open('karten2',1);
-  r.onupgradeneeded=()=>{const d=r.result;d.createObjectStore('cards',{keyPath:'id'});d.createObjectStore('decks',{keyPath:'id'});d.createObjectStore('meta')};
+  const r=indexedDB.open('karten2',2);
+  r.onupgradeneeded=()=>{const d=r.result;[...KINDS].forEach(n=>{if(!d.objectStoreNames.contains(n))d.createObjectStore(n,{keyPath:'id'})});if(!d.objectStoreNames.contains('meta'))d.createObjectStore('meta')};
   r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error);
 });
 const tx=async(st,mode,fn)=>{const d=await dbp;return new Promise((ok,no)=>{const t=d.transaction(st,mode);const out=fn(t);t.oncomplete=()=>ok(out&&out.result);t.onerror=()=>no(t.error);t.onabort=()=>no(t.error)})};
@@ -59,12 +121,14 @@ const idbGet=(st,k)=>tx(st,'readonly',t=>t.objectStore(st).get(k));
 const idbPut=(st,v,k)=>tx(st,'readwrite',t=>k===undefined?t.objectStore(st).put(v):t.objectStore(st).put(v,k));
 const idbPutMany=(st,arr)=>tx(st,'readwrite',t=>{const o=t.objectStore(st);arr.forEach(v=>o.put(v))});
 
-function rebuild(){S.cards=[...M.cards.values()];S.decks=[...M.decks.values()].sort((a,b)=>a.name.localeCompare(b.name,'de'))}
+const pathCmp=(a,b)=>{const x=a.name.split('::'),y=b.name.split('::');for(let i=0;i<Math.min(x.length,y.length);i++){const c=x[i].localeCompare(y[i],'de');if(c)return c}return x.length-y.length};
+function rebuild(){KINDS.forEach(k=>S[k]=[...M[k].values()]);S.decks.sort(pathCmp)}
 function setLocal(kind,o){M[kind].set(o.id,o);rebuild()}
 /* Jede lokale Änderung: Zeitstempel setzen, als „noch nicht hochgeladen“ markieren, speichern, Sync anstoßen */
 function persist(kind,o){o.updatedAt=Date.now();o.dirty=1;idbPut(kind,o).catch(e=>alert('Lokales Speichern fehlgeschlagen: '+e));kick()}
+function persistMany(kind,arr){const t=Date.now();arr.forEach(o=>{o.updatedAt=t;o.dirty=1});idbPutMany(kind,arr).catch(e=>alert('Lokales Speichern fehlgeschlagen: '+e));kick()}
 
-/* Einmalig: Karten aus der alten, rein lokalen Version (Datenbank „karten“) übernehmen */
+/* Einmalig: Karten aus der allerersten, rein lokalen Version (Datenbank „karten“) übernehmen */
 function readOld(){return new Promise(ok=>{
   const r=indexedDB.open('karten',1);
   r.onupgradeneeded=()=>r.result.createObjectStore('kv');
@@ -83,8 +147,8 @@ async function migrate(){
 }
 async function boot(){
   try{
-    const [cs,ds]=await Promise.all([idbAll('cards'),idbAll('decks')]);
-    cs.forEach(c=>M.cards.set(c.id,c));ds.forEach(d=>M.decks.set(d.id,d));
+    const all=await Promise.all(KINDS.map(k=>idbAll(k)));
+    KINDS.forEach((k,i)=>all[i].forEach(o=>M[k].set(o.id,o)));
     lastSrv=(await idbGet('meta','lastSrv'))||{};
     if(!(await idbGet('meta','migrated')))await migrate();
     rebuild();
@@ -95,7 +159,7 @@ async function boot(){
 /* ---------- Sync mit Firestore: es werden nur Änderungen übertragen ---------- */
 const wt=(p,ms=25000)=>Promise.race([p,new Promise((_,no)=>setTimeout(()=>no(new Error('Zeitüberschreitung (offline?)')),ms))]);
 const ref=(k,id)=>D.doc(db,'users',user.uid,k,id);
-const dirtyCount=()=>S.cards.filter(c=>c.dirty).length+S.decks.filter(d=>d.dirty).length;
+const dirtyCount=()=>KINDS.reduce((n,k)=>n+S[k].filter(x=>x.dirty).length,0);
 const statusText=()=>!CFG.apiKey?'Nur lokal gespeichert (Cloud nicht eingerichtet).':fbErr?fbErr:!user?'Nicht angemeldet: nur lokal gespeichert.':(syncMsg||'Bereit.');
 function ui(full){const s=$('#st');if(s)s.textContent=statusText();if(full&&tab==='data')render()}
 
@@ -113,8 +177,8 @@ async function fbInit(){
         if(su&&su!==u.uid){
           if(!confirm('Dieses Gerät enthält Karten eines anderen Kontos. In dieses Konto übernehmen?')){await A.signOut(auth);return}
           lastSrv={};await idbPut('meta',{},'lastSrv');
-          [...S.cards,...S.decks].forEach(x=>x.dirty=1);
-          await idbPutMany('cards',S.cards);await idbPutMany('decks',S.decks);
+          KINDS.forEach(k=>S[k].forEach(x=>x.dirty=1));
+          for(const k of KINDS)await idbPutMany(k,S[k]);
         }
         if(su!==u.uid)await idbPut('meta',u.uid,'uid');
         render();sync();
@@ -162,7 +226,7 @@ async function pullKind(kind){
     });
     if(touched.length)await idbPutMany(kind,touched);
     n+=snap.docs.length;
-    if(n>500){syncMsg=`Lade ${kind==='cards'?'Karten':'Stapel'} … ${n}`;ui()}
+    if(n>500){syncMsg=`Lade ${kind} … ${n}`;ui()}
     if(snap.docs.length<500)break;
     after=snap.docs[snap.docs.length-1];
   }
@@ -186,9 +250,10 @@ async function sync(){
   if(!navigator.onLine){syncMsg='Offline. Änderungen werden später hochgeladen.';ui();return}
   syncing=true;syncMsg='Synchronisiere …';ui();
   try{
-    const a=await pullKind('decks'),b=await pullKind('cards');
-    if(a||b){rebuild();changed()}
-    await push('decks');await push('cards');
+    let any=false;
+    for(const k of KINDS)if(await pullKind(k))any=true;
+    if(any){rebuild();changed()}
+    for(const k of KINDS)await push(k);
     syncMsg='Synchronisiert um '+new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})+'.';
     syncing=false;ui(true);
     if(dirtyCount())kick();
@@ -202,93 +267,244 @@ setInterval(()=>{if(!document.hidden)sync()},120000);
 /* Nach Änderungen von anderen Geräten nur dort neu zeichnen, wo es nicht stört */
 function changed(){
   if(tab==='learn'&&!cur)render();
-  else if(tab==='data')render();
-  else if(tab==='cards'){const s=$('#cd');if(!s||s.options.length!==S.decks.length)render();else refreshList()}
+  else if(tab==='data'||tab==='stats')render();
+  else if(tab==='cards'){const s=$('#cd');if(!s||s.options.length!==liveDecks().length)render();else refreshList()}
 }
 
-/* ---------- Lernen (unverändert gegenüber deiner Version) ---------- */
-/* r: 0 Nochmal, 1 Schwer, 2 Gut, 3 Leicht (SM-2-Variante) */
-function review(c,r){
-  if(r===0){c.interval=0;c.ease=Math.max(1.3,c.ease-.2);c.due=today();}
-  else{
-    if(c.interval===0)c.interval=1;
-    else if(c.interval===1)c.interval=3;
-    else c.interval=Math.max(c.interval+1,Math.round(c.interval*c.ease*[.8,1,1.3][r-1]));
-    c.ease=Math.max(1.3,c.ease+[-.15,0,.15][r-1]);
-    c.due=today()+c.interval;
-  }
-  c.reps++;
-  persist('cards',c);
+/* ---------- Stapel, Tags, Formatierung ---------- */
+const liveDecks=()=>S.decks.filter(d=>!d.deleted);
+const liveCards=()=>S.cards.filter(c=>!c.deleted);
+const liveCount=()=>liveCards().length;
+const deckLabel=d=>esc(d.name.replace(/::/g,' › '));
+const inSub=(name,root)=>name===root||name.startsWith(root+'::');
+function inFilter(c){
+  if(tagFilter&&!(c.tags||[]).includes(tagFilter))return false;
+  if(filter==='all')return true;
+  const f=M.decks.get(filter);if(!f||f.deleted)return true;
+  const d=M.decks.get(c.deck);return !!d&&inSub(d.name,f.name);
 }
-const dueCards=()=>S.cards.filter(c=>!c.deleted&&c.due<=today()&&(filter==='all'||c.deck===filter));
+const allTags=()=>[...new Set(liveCards().flatMap(c=>c.tags||[]))].sort((a,b)=>a.localeCompare(b,'de'));
+const parseTags=s=>[...new Set(String(s).split(',').map(x=>x.trim()).filter(Boolean))];
+/* Einfache Formatierung: **fett**, *kursiv* */
+const fmt=s=>esc(s).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g,'$1<i>$2</i>');
+const cloze=(t,show)=>fmt(t).replace(/\{\{c\d+::(.*?)\}\}/g,(m,a)=>show?`<b class=hit>${a}</b>`:'<span class=gap>[…]</span>');
 const lines=c=>c.back.split('\n').filter(x=>x.trim());
-const cloze=(t,show)=>esc(t).replace(/\{\{c\d+::(.*?)\}\}/g,(m,a)=>show?`<b class=hit>${a}</b>`:'<span class=gap>[…]</span>');
-function next(){cur=queue.shift()||null;shown=false;step=1;render()}
-function start(){queue=dueCards().sort(()=>Math.random()-.5);next()}
-function rate(r){const c=cur;review(c,r);if(r===0)queue.push(c);next()}
+function deckCounts(){
+  const t=today(),m={};
+  const add=(name,k)=>{const p=name.split('::');for(let i=1;i<=p.length;i++){const n=p.slice(0,i).join('::');(m[n]||(m[n]={rev:0,neu:0,tot:0}))[k]++}};
+  liveCards().forEach(c=>{const d=M.decks.get(c.deck);if(!d||d.deleted)return;add(d.name,'tot');if(c.reps>0){if(c.due<=t)add(d.name,'rev')}else add(d.name,'neu')});
+  return m;
+}
+const byCreated=(a,b)=>((a.created||0)-(b.created||0))||(a.id<b.id?-1:1);
 
+/* ---------- Lernen ---------- */
+const settingsRet=()=>settings().retention;
+function addLog(entry){
+  const id=DEV+'_'+today();
+  let L=M.logs.get(id);
+  if(!L){L={id,dev:DEV,day:today(),e:[]};M.logs.set(id,L);rebuild()}
+  L.e.push(entry);persist('logs',L);
+}
+function removeLog(t){
+  for(const L of M.logs.values()){
+    if(L.dev!==DEV)continue;
+    const i=(L.e||[]).findIndex(x=>x[0]===t);
+    if(i>=0){L.e.splice(i,1);persist('logs',L);return}
+  }
+}
+const UF=['st','df','lr','interval','due','reps','lapses','first'];
+function review(c,g){
+  const m=mem(c),p=fsPlan(m,m?Math.max(0,today()-m.lr):0,settingsRet())[g-1],isNew=!c.reps,t=Date.now();
+  if(isNew)c.first=today();
+  c.st=p.s;c.df=p.d;c.lr=today();c.interval=p.ivl;c.due=today()+p.ivl;
+  if(g===1)c.lapses=(c.lapses||0)+1;
+  c.reps=(c.reps||0)+1;
+  addLog([t,c.id,g,isNew?0:2,p.ivl]);
+  persist('cards',c);
+  return t;
+}
+function dueSets(){
+  const t=today(),cs=liveCards().filter(inFilter);
+  const rev=cs.filter(c=>c.reps>0&&c.due<=t);
+  const intro=liveCards().filter(c=>c.first===t).length;
+  const fresh=cs.filter(c=>!c.reps).sort(byCreated);
+  return{rev,fresh:fresh.slice(0,Math.max(0,settings().newPerDay-intro)),freshTotal:fresh.length};
+}
+function next(){cur=queue.shift()||null;shown=false;step=1;render()}
+function start(){const s=dueSets();queue=[...s.rev.sort(()=>Math.random()-.5),...s.fresh];undo=[];redo=new Set();next()}
+/* g: 1 Nochmal, 2 Schwer, 3 Gut, 4 Leicht */
+function rate(g){
+  const c=cur,u={id:c.id,q:queue.slice(),redo:[...redo]};
+  if(redo.has(c.id)){                 /* Wiederholung in derselben Sitzung: ändert den Lernplan nicht mehr */
+    if(g===1)queue.push(c);else redo.delete(c.id);
+  }else{
+    u.snap={};UF.forEach(k=>u.snap[k]=c[k]);
+    u.t=review(c,g);
+    if(g===1){redo.add(c.id);queue.push(c)}
+  }
+  undo.push(u);if(undo.length>50)undo.shift();
+  next();
+}
+function undoLast(){
+  const u=undo.pop();if(!u)return;
+  const c=M.cards.get(u.id);if(!c||c.deleted)return render();
+  if(u.snap){UF.forEach(k=>{if(u.snap[k]===undefined)delete c[k];else c[k]=u.snap[k]});persist('cards',c);removeLog(u.t)}
+  queue=u.q;redo=new Set(u.redo);cur=c;shown=true;step=c.type==='steps'?lines(c).length:1;render();
+}
+function fmtIvl(d){
+  if(d<30)return d+' T';
+  const n=d<365?d/30.4:d/365.25,u=d<365?'Mon':'J';
+  return (n<10?Math.round(n*10)/10:Math.round(n)).toString().replace('.',',')+' '+u;
+}
 function learnView(){
-  const opts=`<option value=all>Alle Stapel</option>`+S.decks.map(d=>`<option value=${d.id} ${filter===d.id?'selected':''}>${esc(d.name)}</option>`).join('');
-  if(!cur){const n=dueCards().length;
-    return `<select onchange="filter=this.value;render()">${opts}</select>
-    <p>${n?`<b>${n}</b> Karten fällig.`:'Heute ist nichts fällig.'}</p>
-    ${n?'<button class=b onclick=start()>Lernen starten</button>':''}${backupNag()}`}
+  if(filter!=='all'&&!(M.decks.get(filter)&&!M.decks.get(filter).deleted))filter='all';
+  const dc=deckCounts();
+  const opts=`<option value=all>Alle Stapel</option>`+liveDecks().map(d=>{const k=dc[d.name]||{rev:0,neu:0};return `<option value=${d.id} ${filter===d.id?'selected':''}>${deckLabel(d)} · ${k.rev} fällig, ${k.neu} neu</option>`}).join('');
+  const tags=allTags(),topt=tags.length?`<select onchange="tagFilter=this.value;render()"><option value="">Alle Tags</option>${tags.map(t=>`<option ${tagFilter===t?'selected':''} value="${esc(t)}">${esc(t)}</option>`).join('')}</select>`:'';
+  if(!cur){
+    const s=dueSets(),n=s.rev.length+s.fresh.length,wait=s.freshTotal-s.fresh.length;
+    return `<select onchange="filter=this.value;render()">${opts}</select>${topt}
+    <p>${n?`<b>${n}</b> Karten heute: ${s.rev.length} Wiederholungen, ${s.fresh.length} neue.`:'Heute ist nichts fällig.'}${wait?` <span class=mute>${wait} weitere neue warten wegen des Tageslimits (${settings().newPerDay}).</span>`:''}</p>
+    ${n?'<button class=b onclick=start()>Lernen starten</button>':''}${undo.length?'<button class="b g" onclick=undoLast()>↶ Letzte Bewertung rückgängig</button>':''}${backupNag()}`}
   const L=cur.type==='steps'?lines(cur):[];
   const done=cur.type==='steps'?step>=L.length:shown;
   let h='<div class=card>';
-  if(cur.type==='cloze')h+=cloze(cur.front,shown)+(shown&&cur.back?`<hr>${esc(cur.back)}`:'');
-  else if(cur.type==='steps')h+=esc(cur.front)+`<ol>${L.slice(0,step).map(x=>`<li>${esc(x)}</li>`).join('')}</ol>`;
-  else h+=esc(cur.front)+(shown?`<hr>${esc(cur.back)}`:'');
+  if(cur.type==='cloze')h+=cloze(cur.front,shown)+(shown&&cur.back?`<hr>${fmt(cur.back)}`:'');
+  else if(cur.type==='steps')h+=fmt(cur.front)+`<ol>${L.slice(0,step).map(x=>`<li>${fmt(x)}</li>`).join('')}</ol>`;
+  else h+=fmt(cur.front)+(shown?`<hr>${fmt(cur.back)}`:'');
   h+='</div>';
   if(!done)h+=cur.type==='steps'
     ?`<button class=b onclick="step++;render()">Nächster Punkt (${step}/${L.length})</button><button class="b g" onclick="step=${L.length};render()">Alle zeigen</button>`
     :`<button class=b onclick="shown=true;render()">Antwort zeigen</button>`;
-  else h+=`<div class=rate>${['Nochmal','Schwer','Gut','Leicht'].map((t,i)=>`<button class="b ${i?'':'g'}" onclick=rate(${i})>${t}</button>`).join('')}</div>`;
-  return h+`<p class=mute>Noch ${queue.length} danach</p>`;
+  else if(redo.has(cur.id))h+=`<div class="rate two"><button class="b g" onclick=rate(1)>Nochmal</button><button class=b onclick=rate(3)>Gewusst</button></div><p class=mute>Wiederholung in dieser Sitzung, ändert den Lernplan nicht.</p>`;
+  else{const p=plan(cur);h+=`<div class=rate>${['Nochmal','Schwer','Gut','Leicht'].map((t,i)=>`<button class="b ${i?'':'g'}" onclick=rate(${i+1})>${t}<small>${i?fmtIvl(p[i].ivl):'gleich'}</small></button>`).join('')}</div>`}
+  return h+`<p class=mute>Noch ${queue.length} danach</p>${undo.length?'<button class="b g s" onclick=undoLast()>↶ Rückgängig</button>':''}`;
 }
 
 /* ---------- Karten verwalten ---------- */
-const liveCount=()=>S.cards.filter(c=>!c.deleted).length;
 function listHTML(){
   const t=q.trim().toLowerCase();
-  const all=S.cards.filter(c=>!c.deleted&&(!t||c.front.toLowerCase().includes(t)||(c.back||'').toLowerCase().includes(t)))
+  const all=liveCards().filter(c=>!t||c.front.toLowerCase().includes(t)||(c.back||'').toLowerCase().includes(t)||(c.tags||[]).some(x=>x.toLowerCase().includes(t)))
     .sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
-  return all.slice(0,100).map(c=>`<div class=row><span onclick="editId='${c.id}';render();scrollTo(0,0)">${esc(c.front.slice(0,70))}</span><button class="b g" onclick="del('${c.id}')">Löschen</button></div>`).join('')
+  return all.slice(0,100).map(c=>{const d=M.decks.get(c.deck);return `<div class=row><span onclick="editId='${c.id}';render();scrollTo(0,0)">${esc(c.front.slice(0,70))}<small>${d&&!d.deleted?deckLabel(d):''}${(c.tags||[]).length?' · '+esc(c.tags.join(', ')):''}</small></span><button class="b g s" onclick="del('${c.id}')">Löschen</button></div>`}).join('')
     +(all.length>100?`<p class=mute>${all.length-100} weitere Karten. Mit der Suche eingrenzen.</p>`:'');
 }
 function refreshList(){const l=$('#lst'),n=$('#cnt');if(l)l.innerHTML=listHTML();if(n)n.textContent=liveCount()}
+function deckManage(){
+  const dc=deckCounts();
+  return `<details><summary>Stapel verwalten</summary>${liveDecks().map(d=>`<div class=row><span>${deckLabel(d)}<small>${(dc[d.name]||{tot:0}).tot} Karten</small></span><div class=acts><button class="b g s" onclick="renameDeck('${d.id}')">Umbenennen</button><button class="b g s" onclick="deleteDeck('${d.id}')">Löschen</button></div></div>`).join('')}</details>`;
+}
 function cardsView(){
-  const e=M.cards.get(editId)||{type:'basic',front:'',back:'',deck:filter!=='all'?filter:S.decks[0]?.id};
-  const dk=`<input id=dn placeholder="Neuer Stapel, z. B. Strafrecht AT"><button class="b g" onclick=addDeck()>Stapel anlegen</button>`;
-  if(!S.decks.length)return `<p>Lege zuerst einen Stapel an.</p>${dk}`;
-  return `${dk}<hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
-  <select id=cd>${S.decks.map(d=>`<option value=${d.id} ${e.deck===d.id?'selected':''}>${esc(d.name)}</option>`).join('')}</select>
+  const decks=liveDecks();
+  const e=M.cards.get(editId)||{type:'basic',front:'',back:'',tags:[],deck:(filter!=='all'&&M.decks.get(filter))?filter:decks[0]?.id};
+  const dk=`<input id=dn placeholder="Neuer Stapel, z. B. Strafrecht::AT (:: = Unterstapel)"><button class="b g" onclick=addDeck()>Stapel anlegen</button>`;
+  if(!decks.length)return `<p>Lege zuerst einen Stapel an.</p>${dk}`;
+  return `${dk}${deckManage()}<hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+  <select id=cd>${decks.map(d=>`<option value=${d.id} ${e.deck===d.id?'selected':''}>${deckLabel(d)}</option>`).join('')}</select>
   <select id=ct onchange="hint()">${Object.entries(TYPES).map(([k,v])=>`<option value=${k} ${e.type===k?'selected':''}>${v}</option>`).join('')}</select>
   <textarea id=cf placeholder="Vorderseite / Frage / Lückentext">${esc(e.front)}</textarea>
   <textarea id=cb placeholder="Rückseite / Punkte">${esc(e.back)}</textarea>
+  <input id=ctg placeholder="Tags, durch Komma getrennt (z. B. Klausur, § 212)" value="${esc((e.tags||[]).join(', '))}">
   <p class=mute id=h></p>
   <button class=b onclick=saveCard()>${editId?'Änderung speichern':'Karte speichern'}</button>${editId?'<button class="b g" onclick="editId=null;render()">Abbrechen</button>':''}
+  <details><summary>Mehrere Karten auf einmal anlegen</summary>
+    <p class=mute>Eine Karte pro Zeile: <b>Vorderseite | Rückseite</b> (mit Leerzeichen um den Strich). Zeilen mit {{c1::…}} werden Lückentext. Stapel und Tags wie oben eingestellt.</p>
+    <textarea id=bulk placeholder="Was ist Vorsatz? | Wissen und Wollen der Tatbestandsverwirklichung"></textarea>
+    <button class="b g" onclick=bulkAdd()>Karten anlegen</button></details>
   <h3>Karten (<span id=cnt>${liveCount()}</span>)</h3>
-  <input id=qs placeholder="Karten durchsuchen" value="${esc(q)}" oninput="q=this.value;refreshList()">
+  <input id=qs placeholder="Karten durchsuchen (Text oder Tag)" value="${esc(q)}" oninput="q=this.value;refreshList()">
   <div id=lst>${listHTML()}</div>`;
 }
-function hint(){const t=$('#ct').value;$('#h').textContent={basic:'Normale Karte: Frage vorn, Antwort hinten.',cloze:'Lücken so schreiben: Der {{c1::Vorsatz}} umfasst Wissen und Wollen. Rückseite ist optional.',steps:'Hinten: ein Prüfungsschritt pro Zeile. Beim Lernen deckst du sie nacheinander auf.'}[t]}
-function addDeck(){const n=$('#dn').value.trim();if(!n)return;const d={id:uid(),name:n};setLocal('decks',d);persist('decks',d);render()}
+function hint(){const t=$('#ct').value;$('#h').textContent={basic:'Normale Karte: Frage vorn, Antwort hinten. Formatierung: **fett**, *kursiv*.',cloze:'Lücken so schreiben: Der {{c1::Vorsatz}} umfasst Wissen und Wollen. Rückseite ist optional.',steps:'Hinten: ein Prüfungsschritt pro Zeile. Beim Lernen deckst du sie nacheinander auf.'}[t]}
+function ensureDeck(name){
+  const parts=name.split('::');let last=null;
+  for(let i=1;i<=parts.length;i++){
+    const n=parts.slice(0,i).join('::');
+    let d=liveDecks().find(x=>x.name===n);
+    if(!d){d={id:uid(),name:n};setLocal('decks',d);persist('decks',d)}
+    last=d;
+  }
+  return last;
+}
+function addDeck(){
+  const n=$('#dn').value.trim().split('::').map(x=>x.trim()).filter(Boolean).join('::');if(!n)return;
+  if(liveDecks().some(d=>d.name===n))return alert('Diesen Stapel gibt es schon.');
+  ensureDeck(n);render();
+}
+function renameDeck(id){
+  const d=M.decks.get(id);if(!d)return;
+  const n=(prompt('Neuer Name (:: für Unterstapel):',d.name)||'').split('::').map(x=>x.trim()).filter(Boolean).join('::');
+  if(!n||n===d.name)return;
+  const sub=liveDecks().filter(x=>inSub(x.name,d.name));
+  const clash=liveDecks().find(x=>!sub.includes(x)&&sub.some(s=>n+s.name.slice(d.name.length)===x.name));
+  if(clash)return alert('Ein Stapel mit diesem Namen existiert schon: '+clash.name);
+  const old=d.name;sub.forEach(x=>{x.name=n+x.name.slice(old.length);persist('decks',x)});
+  rebuild();render();
+}
+function deleteDeck(id){
+  const d=M.decks.get(id);if(!d)return;
+  const sub=liveDecks().filter(x=>inSub(x.name,d.name)),ids=new Set(sub.map(x=>x.id));
+  const cs=liveCards().filter(c=>ids.has(c.deck));
+  if(!confirm(`„${d.name.replace(/::/g,' › ')}“ löschen?\n${sub.length>1?(sub.length-1)+' Unterstapel und ':''}${cs.length} Karten werden gelöscht.\nTipp: Mach vorher ein Backup.`))return;
+  cs.forEach(c=>{c.deleted=1;persist('cards',c)});sub.forEach(x=>{x.deleted=1;persist('decks',x)});
+  if(ids.has(filter))filter='all';
+  rebuild();render();
+}
 function saveCard(){
-  const f=$('#cf').value.trim(),b=$('#cb').value.trim(),t=$('#ct').value;
+  const f=$('#cf').value.trim(),b=$('#cb').value.trim(),t=$('#ct').value,tags=parseTags($('#ctg').value);
   if(!f||(t!=='cloze'&&!b))return alert('Bitte Vorder- und Rückseite ausfüllen.');
   if(t==='cloze'&&!/\{\{c\d+::/.test(f))return alert('Mindestens eine Lücke nötig: {{c1::Text}}');
-  if(editId){const c=M.cards.get(editId);Object.assign(c,{deck:$('#cd').value,type:t,front:f,back:b});persist('cards',c);editId=null}
-  else{const c={id:uid(),deck:$('#cd').value,type:t,front:f,back:b,interval:0,ease:2.5,due:today(),reps:0};setLocal('cards',c);persist('cards',c)}
+  if(editId){const c=M.cards.get(editId);Object.assign(c,{deck:$('#cd').value,type:t,front:f,back:b,tags});persist('cards',c);editId=null}
+  else{const c={id:uid(),deck:$('#cd').value,type:t,front:f,back:b,tags,reps:0,due:today(),created:Date.now()};setLocal('cards',c);persist('cards',c)}
   render()}
+function bulkAdd(){
+  const rows=$('#bulk').value.split('\n').map(x=>x.trim()).filter(Boolean),dk=$('#cd').value,tags=parseTags($('#ctg').value);
+  const out=[],bad=[];let n=Date.now();
+  rows.forEach(l=>{
+    if(/\{\{c\d+::/.test(l))return out.push({type:'cloze',front:l,back:''});
+    const i=l.indexOf(' | ');
+    if(i<1||!l.slice(i+3).trim())return bad.push(l);
+    out.push({type:'basic',front:l.slice(0,i).trim(),back:l.slice(i+3).trim()});
+  });
+  if(!out.length)return alert('Keine gültigen Zeilen gefunden.');
+  if(!confirm(`${out.length} Karten anlegen?${bad.length?`\n${bad.length} Zeilen ohne „ | “ werden übersprungen.`:''}`))return;
+  const cs=out.map(o=>({id:uid(),deck:dk,tags,reps:0,due:today(),created:n++,...o}));
+  cs.forEach(c=>M.cards.set(c.id,c));rebuild();persistMany('cards',cs);
+  q='';render();
+}
 /* Löschen = Markierung, damit das Löschen auch auf den anderen Geräten ankommt */
 function del(id){if(confirm('Karte löschen?')){const c=M.cards.get(id);c.deleted=1;persist('cards',c);refreshList()}}
 
-/* ---------- Daten: Konto, Backup, Wiederherstellung, Anki-Export ---------- */
+/* ---------- Statistik ---------- */
+const bars=(vals,lab)=>{const mx=Math.max(1,...vals);return `<div class=bars>${vals.map((v,i)=>`<i style="height:${Math.round(v/mx*100)}%" title="${lab(i)}: ${v}"></i>`).join('')}</div>`};
+function statsView(){
+  const t=today(),per={};let n30=0,ok30=0,newToday=0;
+  S.logs.forEach(L=>{
+    const e=L.e||[];per[L.day]=(per[L.day]||0)+e.length;
+    if(L.day===t)e.forEach(x=>{if(x[3]===0)newToday++});
+    if(L.day>t-30)e.forEach(x=>{if(x[3]===2){n30++;if(x[2]>=2)ok30++}});
+  });
+  let streak=0;for(let d=per[t]?t:t-1;per[d]>0;d--)streak++;
+  const last30=Array.from({length:30},(_,i)=>per[t-29+i]||0);
+  const cs=liveCards(),fc=Array(14).fill(0);
+  cs.forEach(c=>{if(c.reps>0){const k=Math.max(0,c.due-t);if(k<14)fc[k]++}});
+  const nNew=cs.filter(c=>!c.reps).length,mature=cs.filter(c=>c.reps>0&&(c.interval||0)>=21).length,young=cs.length-nNew-mature;
+  const dc=deckCounts(),top=Object.keys(dc).sort((a,b)=>pathCmp({name:a},{name:b}));
+  const total=S.logs.reduce((n,L)=>n+(L.e||[]).length,0);
+  return `<div class=kpi><div><b>${per[t]||0}</b><span>Wiederholungen heute</span></div><div><b>${streak}</b><span>Tage in Folge</span></div><div><b>${n30?Math.round(ok30/n30*100)+' %':'–'}</b><span>Trefferquote (30 Tage)</span></div></div>
+  <h3>Letzte 30 Tage</h3>${bars(last30,i=>dayStr(t-29+i))}<div class=axis><span>${dayStr(t-29)}</span><span>heute</span></div>
+  <h3>Fällig in den nächsten 14 Tagen</h3>${bars(fc,i=>i?dayStr(t+i):'heute (inkl. überfällig)')}<div class=axis><span>heute</span><span>${dayStr(t+13)}</span></div>
+  <h3>Kartenbestand</h3>
+  <div class=kpi><div><b>${nNew}</b><span>neu</span></div><div><b>${young}</b><span>in Arbeit (&lt; 21 Tage)</span></div><div><b>${mature}</b><span>gefestigt (≥ 21 Tage)</span></div></div>
+  ${top.length?`<h3>Stapel</h3><table><tr><th>Stapel</th><th>Karten</th><th>Fällig</th><th>Neu</th></tr>${top.map(n=>`<tr><td>${esc(n.replace(/::/g,' › '))}</td><td>${dc[n].tot}</td><td>${dc[n].rev}</td><td>${dc[n].neu}</td></tr>`).join('')}</table>`:''}
+  <p class=mute>${total} Bewertungen insgesamt gespeichert. Die Trefferquote zählt nur Wiederholungen, keine neuen Karten. Ziel ist deine eingestellte Behaltensquote (${Math.round(settings().retention*100)} %).</p>`;
+}
+
+/* ---------- Daten: Konto, Einstellungen, Backup, Wiederherstellung, Anki-Export ---------- */
 const backupDays=()=>{const l=ls('lastBackup');return l?Math.floor((Date.now()-new Date(l))/864e5):null};
 const backupNag=()=>{const d=backupDays();return liveCount()&&(d===null||d>30)?'<p class=mute>Tipp: Unter „Daten“ eine Backup-Datei sichern.</p>':''};
 function accountHTML(){
-  if(!CFG.apiKey)return `<p><b>Cloud-Sync ist noch nicht eingerichtet.</b> Trage die Firebase-Konfiguration oben in index.html ein. Bis dahin liegen deine Karten nur auf diesem Gerät.</p>`;
+  if(!CFG.apiKey)return `<p><b>Cloud-Sync ist noch nicht eingerichtet.</b> Lege im Repository eine Datei <code>config.js</code> mit deinen Firebase-Werten an. Bis dahin liegen deine Karten nur auf diesem Gerät.</p>`;
   if(fbErr)return `<p>${esc(fbErr)}</p>`;
   if(!auth)return '<p class=mute>Cloud lädt …</p>';
   if(!user)return `<p>Melde dich an, damit alle Geräte denselben Stand haben. Beim ersten Mal „Konto erstellen“, auf den anderen Geräten „Anmelden“ mit denselben Daten.</p>
@@ -301,19 +517,26 @@ function accountHTML(){
     <button class=b onclick=sync()>Jetzt synchronisieren</button><button class="b g" onclick=logout()>Abmelden</button>
     <p class=mute>Beim Abmelden bleiben alle Karten auf diesem Gerät erhalten.</p>`;
 }
+function setSetting(k,v){let o=M.settings.get('main');if(!o){o={id:'main',newPerDay:20,retention:0.9};M.settings.set('main',o);rebuild()}o[k]=v;persist('settings',o)}
 function dataView(){
-  const d=backupDays();
-  return `<p>${liveCount()} Karten in ${S.decks.length} Stapeln.</p>
+  const d=backupDays(),s=settings();
+  return `<p>${liveCount()} Karten in ${liveDecks().length} Stapeln.</p>
   <h3>Synchronisation</h3>${accountHTML()}
+  <h3>Lernen</h3>
+  <p class=mute>Neue Karten pro Tag (Wiederholungen sind unbegrenzt). Gilt auf allen Geräten:</p>
+  <input type=number min=0 max=999 value=${s.newPerDay} onchange="setSetting('newPerDay',Math.max(0,parseInt(this.value)||0))">
+  <p class=mute>Gewünschte Behaltensquote. Höher heißt mehr Wiederholungen. 90 % ist ein guter Start:</p>
+  <select onchange="setSetting('retention',+this.value)">${[0.8,0.85,0.9,0.93,0.95].map(v=>`<option value=${v} ${s.retention===v?'selected':''}>${Math.round(v*100)} %</option>`).join('')}</select>
   <h3>Backup</h3>
-  <p>${d===null?'Noch kein Backup gemacht.':`Letztes Backup: vor ${d} Tag(en).`} Sichere regelmäßig eine Datei, zusätzlich zur Cloud.</p>
+  <p>${d===null?'Noch kein Backup gemacht.':`Letztes Backup: vor ${d} Tag(en).`} Sichere regelmäßig eine Datei, zusätzlich zur Cloud. Sie enthält Karten, Lernverlauf und Einstellungen.</p>
   <button class=b onclick=exp()>Backup exportieren</button>
   <p><label class="b g" style="display:inline-block">Backup wiederherstellen<input type=file accept=.json hidden onchange="imp(this.files[0]);this.value=''"></label></p>
   <p class=mute>Beim Wiederherstellen werden Karten mit gleicher ID überschrieben (auch gelöschte kommen zurück), alle anderen bleiben unverändert.</p>
   <h3>Export für Anki</h3>
-  <p class=mute>Textdateien für Anki (Datei → Importieren). So bist du nie auf diese App angewiesen.</p>
+  <p class=mute>Textdateien für Anki (Datei → Importieren), mit Stapeln und Tags. Der Lernplan wird nicht mitgenommen.</p>
   <button class="b g" onclick="ankiOut('basic')">Frage/Antwort + Stufenkarten</button>
-  <button class="b g" onclick="ankiOut('cloze')">Lückentext-Karten</button>`;
+  <button class="b g" onclick="ankiOut('cloze')">Lückentext-Karten</button>
+  <p class=mute style="margin-top:20px">Version ${APP_V}</p>`;
 }
 async function saveFile(name,text,type){
   const blob=new Blob([text],{type});
@@ -327,36 +550,46 @@ async function saveFile(name,text,type){
   }
 }
 const clean=x=>{const o={...x};delete o.dirty;return o};
-const backupObj=()=>({version:3,exported:new Date().toISOString(),decks:S.decks.map(clean),cards:S.cards.filter(c=>!c.deleted).map(clean)});
+const backupObj=()=>({version:4,exported:new Date().toISOString(),decks:liveDecks().map(clean),cards:liveCards().map(clean),logs:S.logs.map(clean),settings:S.settings.map(clean)});
 async function exp(){
   if(await saveFile('karten-'+new Date().toISOString().slice(0,10)+'.json',JSON.stringify(backupObj()),'application/json')){ls('lastBackup',new Date().toISOString());render()}
 }
 /* Prüft Datensätze, damit eine kaputte Datei nichts zerstört */
 const okDeck=d=>d&&typeof d.id==='string'&&d.id&&typeof d.name==='string';
 const okCard=c=>c&&typeof c.id==='string'&&c.id&&typeof c.front==='string'&&typeof c.back==='string'&&TYPES[c.type||'basic'];
+const okLog=l=>l&&typeof l.id==='string'&&l.id&&Array.isArray(l.e)&&typeof l.day==='number';
 async function imp(f){
   if(!f)return;
   let d;try{d=JSON.parse(await f.text())}catch{return alert('Ungültige Datei.')}
   if(!d||!Array.isArray(d.decks)||!Array.isArray(d.cards))return alert('Ungültige Datei.');
-  const ds=d.decks.filter(okDeck),cs=d.cards.filter(okCard),skipped=d.decks.length+d.cards.length-ds.length-cs.length;
-  if(!confirm(`${cs.length} Karten und ${ds.length} Stapel wiederherstellen?${skipped?`\n${skipped} unbrauchbare Einträge werden übersprungen.`:''}`))return;
-  const t=Date.now(),dl=[],cl=[];
-  ds.forEach(x=>{const o={...x,updatedAt:t,dirty:1};M.decks.set(o.id,o);dl.push(o)});
-  cs.forEach(x=>{const o={type:'basic',interval:0,ease:2.5,due:today(),reps:0,...x,updatedAt:t,dirty:1};delete o.deleted;M.cards.set(o.id,o);cl.push(o)});
-  rebuild();await idbPutMany('decks',dl);await idbPutMany('cards',cl);kick();
+  const ds=d.decks.filter(okDeck),cs=d.cards.filter(okCard),ls_=(d.logs||[]).filter(okLog);
+  const skipped=d.decks.length+d.cards.length+(d.logs||[]).length-ds.length-cs.length-ls_.length;
+  if(!confirm(`${cs.length} Karten, ${ds.length} Stapel und ${ls_.length} Tage Lernverlauf wiederherstellen?${skipped?`\n${skipped} unbrauchbare Einträge werden übersprungen.`:''}`))return;
+  const dl=[],cl_=[],ll=[];
+  ds.forEach(x=>{const o={...x};delete o.deleted;M.decks.set(o.id,o);dl.push(o)});
+  cs.forEach(x=>{const o={type:'basic',reps:0,due:today(),...x};delete o.deleted;M.cards.set(o.id,o);cl_.push(o)});
+  /* Lernverlauf wird zusammengeführt statt überschrieben */
+  ls_.forEach(x=>{
+    const have=M.logs.get(x.id);
+    if(have){const seen=new Set(have.e.map(y=>y[0]+'|'+y[1]));const add=x.e.filter(y=>!seen.has(y[0]+'|'+y[1]));if(add.length){have.e.push(...add);ll.push(have)}}
+    else{const o={...x};M.logs.set(o.id,o);ll.push(o)}
+  });
+  if(d.settings&&d.settings[0]&&typeof d.settings[0].retention==='number'){const o={...d.settings[0],id:'main'};M.settings.set('main',o);persistMany('settings',[o])}
+  rebuild();persistMany('decks',dl);persistMany('cards',cl_);persistMany('logs',ll);
   alert('Wiederherstellung abgeschlossen.');render();
 }
 /* Anki-Textimport: Tab-getrennt, HTML erlaubt. Lückentext-Syntax {{c1::…}} ist identisch zu Anki. */
-const ah=s=>esc(s).replace(/\t/g,' ').replace(/\r?\n/g,'<br>');
+const ah=s=>fmt(s).replace(/\t/g,' ').replace(/\r?\n/g,'<br>');
 function ankiText(kind){
-  const rows=S.cards.filter(c=>!c.deleted&&(kind==='cloze')===(c.type==='cloze'));
-  const lines=[ '#separator:tab','#html:true','#notetype:'+(kind==='cloze'?'Cloze':'Basic'),'#tags column:3','#deck column:4' ];
-  rows.forEach(c=>{
-    const dn=(M.decks.get(c.deck)||{}).name||'Karten';
-    const back=c.type==='steps'?'<ol>'+c.back.split('\n').filter(x=>x.trim()).map(x=>'<li>'+esc(x.trim())+'</li>').join('')+'</ol>':ah(c.back);
-    lines.push([ah(c.front),back,dn.replace(/\s+/g,'_'),dn.replace(/\t/g,' ')].join('\t'));
+  const rows=liveCards().filter(c=>(kind==='cloze')===(c.type==='cloze'));
+  const head=['#separator:tab','#html:true','#notetype:'+(kind==='cloze'?'Cloze':'Basic'),'#tags column:3','#deck column:4'];
+  const out=rows.map(c=>{
+    const d=M.decks.get(c.deck),dn=d&&!d.deleted?d.name:'Karten';
+    const back=c.type==='steps'?'<ol>'+lines(c).map(x=>'<li>'+fmt(x.trim())+'</li>').join('')+'</ol>':ah(c.back);
+    const tags=[dn.replace(/\s+/g,'_'),...(c.tags||[]).map(x=>x.replace(/\s+/g,'_'))].join(' ');
+    return [ah(c.front),back,tags,dn.replace(/\t/g,' ')].join('\t');
   });
-  return{text:lines.join('\n')+'\n',n:rows.length};
+  return{text:[...head,...out].join('\n')+'\n',n:rows.length};
 }
 async function ankiOut(kind){
   const r=ankiText(kind);if(!r.n)return alert('Keine Karten dieser Art vorhanden.');
@@ -365,11 +598,19 @@ async function ankiOut(kind){
 
 function render(){
   if(!ready){$('#app').innerHTML='<p class=mute>Lädt …</p>';return}
-  $('#nav').innerHTML=[['learn','Lernen'],['cards','Karten'],['data','Daten']].map(([k,v])=>`<button class="${tab===k?'on':''}" onclick="tab='${k}';cur=null;render()">${v}</button>`).join('');
-  $('#app').innerHTML={learn:learnView,cards:cardsView,data:dataView}[tab]()+`<p class=mute id=st>${esc(statusText())}</p>`;
-  if(tab==='cards'&&S.decks.length)hint();
+  $('#nav').innerHTML=[['learn','Lernen'],['cards','Karten'],['stats','Statistik'],['data','Daten']].map(([k,v])=>`<button class="${tab===k?'on':''}" onclick="tab='${k}';cur=null;render()">${v}</button>`).join('');
+  $('#app').innerHTML={learn:learnView,cards:cardsView,stats:statsView,data:dataView}[tab]()+`<p class=mute id=st>${esc(statusText())}</p>`;
+  if(tab==='cards'&&liveDecks().length)hint();
 }
 render();boot();
 if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();
-if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
+if('serviceWorker'in navigator){
+  const had=!!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js').then(reg=>{
+    const chk=()=>reg.update().catch(()=>{});
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden)chk()});
+    setInterval(chk,36e5);
+  }).catch(()=>{});
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{if(had){const u=$('#upd');if(u)u.hidden=false}});
+}
 </script></body></html>
