@@ -6,7 +6,7 @@
 <link rel="apple-touch-icon" href="icon-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Karten">
-<meta name="theme-color" content="#1f5f5b">
+<meta name="theme-color" content="#f2f4f6" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#12181e" media="(prefers-color-scheme: dark)">
 <style>
 :root{--bg:#f2f4f6;--surf:#fff;--ink:#1c2630;--mute:#64707c;--line:#d6dce1;--acc:#1f5f5b;--accfg:#fff;--gap:#dbe9e7;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media(prefers-color-scheme:dark){:root{--bg:#12181e;--surf:#1b242c;--ink:#e6ebef;--mute:#8d99a5;--line:#2c3842;--acc:#5fb3ab;--accfg:#0d1a19;--gap:#26403d}}
@@ -49,14 +49,35 @@ table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:right;
 .top{display:flex;justify-content:space-between;align-items:center}
 .ol2 div{margin:6px 0}.ds b{display:block;color:var(--acc);font:600 13px system-ui,sans-serif;margin-top:12px}
 .box{background:var(--surf);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:10px 0}
+:root[data-theme=dark]{--bg:#12181e;--surf:#1b242c;--ink:#e6ebef;--mute:#8d99a5;--line:#2c3842}
+:root[data-theme=light]{--bg:#f2f4f6;--surf:#fff;--ink:#1c2630;--mute:#64707c;--line:#d6dce1}
+html{overscroll-behavior-y:none;-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%}
+*{touch-action:manipulation}
+body{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;padding-bottom:calc(92px + env(safe-area-inset-bottom,0px))}
+input,textarea{-webkit-user-select:text;user-select:text}
+.gap{background:color-mix(in srgb,var(--acc) 16%,var(--surf))}
+nav{position:fixed;left:0;right:0;bottom:0;z-index:5;margin:0;gap:0;justify-content:center;background:color-mix(in srgb,var(--surf) 88%,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-top:1px solid var(--line);padding:6px 8px calc(6px + env(safe-area-inset-bottom,0px))}
+nav:empty{display:none}
+nav button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;font-size:11px;padding:4px 0;min-height:48px;max-width:150px}
+nav button.on{color:var(--acc)}
+.card{transition:transform .2s,opacity .2s}
+.card.in{animation:cin .24s ease}
+@keyframes cin{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.card.in{animation:none}}
+#splash{position:fixed;inset:0;z-index:20;background:var(--acc);color:var(--accfg);display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .35s}
+#splash.off{opacity:0;pointer-events:none}#splash b{font:700 96px Georgia,serif}
+.ringw{display:flex;align-items:center;gap:14px;margin:10px 0}
+.fin{text-align:center;margin:14px 0}.fin path{stroke-dasharray:30;stroke-dashoffset:30;animation:dr .6s .1s forwards}
+@keyframes dr{to{stroke-dashoffset:0}}
 </style></head><body>
+<div id="splash"><b>§</b><p>Karten</p></div>
 <div id="upd" class="banner" hidden><span>Neue Version verfügbar.</span><button onclick="location.reload()">Neu laden</button></div>
 <nav id="nav"></nav><main id="app"></main>
 <script src="config.js"></script>
 <script>
 /* Die Firebase-Zugangsdaten stehen in der Datei config.js (einmal anlegen, bleibt bei Updates unberührt). */
 const CFG=window.CFG||{};
-const APP_V='2.1';
+const APP_V='2.2';
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -336,7 +357,7 @@ function dueSets(){
   const fresh=cs.filter(c=>!c.reps).sort(byCreated);
   return{rev,fresh:fresh.slice(0,Math.max(0,settings().newPerDay-intro)),freshTotal:fresh.length};
 }
-function next(){cur=queue.shift()||null;shown=false;step=1;render()}
+function next(){cur=queue.shift()||null;shown=false;step=1;anim=true;render()}
 function start(){const s=dueSets();queue=[...s.rev.sort(()=>Math.random()-.5),...s.fresh];undo=[];redo=new Set();next()}
 /* g: 1 Nochmal, 2 Schwer, 3 Gut, 4 Leicht */
 function rate(g){
@@ -362,10 +383,28 @@ function fmtIvl(d){
   const n=d<365?d/30.4:d/365.25,u=d<365?'Mon':'J';
   return (n<10?Math.round(n*10)/10:Math.round(n)).toString().replace('.',',')+' '+u;
 }
+let anim=false;
+const ACC={Teal:['#1f5f5b','#5fb3ab'],Blau:['#2457c5','#7aa2ff'],Violett:['#6a3fb5','#b497f2'],Orange:['#b4541a','#f0a06a']};
+const NAVS=[['learn','Lernen','<rect x="5" y="3" width="14" height="18" rx="3"/><path d="M9 8h6M9 12h6"/>'],['cards','Karten','<rect x="3" y="7" width="14" height="12" rx="2"/><path d="M7 7V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2"/>'],['stats','Statistik','<path d="M5 20V10M12 20V4M19 20v-7"/>'],['data','Daten','<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/>']];
+function ringBox(){const t=today(),dn=S.logs.filter(L=>L.day===t).reduce((a,L)=>a+(L.e||[]).length,0),s=dueSets(),n=s.rev.length+s.fresh.length,pct=dn+n?Math.round(100*dn/(dn+n)):0;
+ if(!dn&&!n)return'';
+ return `<div class=ringw><svg viewBox="0 0 36 36" width=88 height=88><circle cx=18 cy=18 r=15.9 fill=none stroke="var(--line)" stroke-width=3 /><circle cx=18 cy=18 r=15.9 fill=none stroke="var(--acc)" stroke-width=3 stroke-linecap=round pathLength=100 stroke-dasharray="${pct} 100" transform="rotate(-90 18 18)" /></svg><div><b style="font-size:24px">${dn}</b> heute gelernt<br><span class=mute>${n} noch offen</span></div></div>`+(dn&&!n?`<div class=fin><svg viewBox="0 0 24 24" width=56 height=56 fill=none stroke="var(--acc)" stroke-width=2.4 stroke-linecap=round stroke-linejoin=round><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><p><b>Für heute geschafft.</b></p></div>`:'')}
+async function enableBadge(){try{const r=await Notification.requestPermission();alert(r==='granted'?'Aktiviert. Die Zahl wird gesetzt, wenn du die App verlässt.':'Nicht erlaubt. Erlaube Mitteilungen für die App in den iPhone-Einstellungen.');setBadge()}catch{alert('Auf diesem Gerät nicht verfügbar. Die App muss dafür auf dem Home-Bildschirm installiert sein.')}}
+function setBadge(){try{if(!navigator.setAppBadge||!ready)return;const s=dueSets(),n=s.rev.length+s.fresh.length;n?navigator.setAppBadge(n):navigator.clearAppBadge()}catch{}}
+document.addEventListener('visibilitychange',()=>{if(document.hidden)setBadge()});
+const isDone=()=>cur&&(stp(cur)?step>=lines(cur).length:shown);
+let gx0=0,gy0=0,gdx=0,gsw=false;
+const APPEL=$('#app');
+APPEL.addEventListener('touchstart',e=>{if(!cur||!e.target.closest('.card'))return;gsw=true;gx0=e.touches[0].clientX;gy0=e.touches[0].clientY;gdx=0},{passive:true});
+APPEL.addEventListener('touchmove',e=>{if(!gsw)return;gdx=e.touches[0].clientX-gx0;if(Math.abs(e.touches[0].clientY-gy0)>Math.abs(gdx))return;const c=$('.card');if(!c||!isDone())return;c.style.transition='none';c.style.transform=`translateX(${gdx}px) rotate(${gdx/45}deg)`;c.style.borderColor=gdx>40?'#2e9e5b':gdx<-40?'#d9534f':''},{passive:true});
+APPEL.addEventListener('touchend',()=>{if(!gsw)return;gsw=false;const c=$('.card');if(!c||!cur)return;
+ if(Math.abs(gdx)<8&&!isDone()){if(stp(cur))step++;else shown=true;render();return}
+ if(Math.abs(gdx)>90&&isDone()){c.style.transform=`translateX(${gdx>0?520:-520}px)`;c.style.opacity=0;const g=gdx>0?3:1;setTimeout(()=>rate(g),170)}
+ else{c.style.transform='';c.style.borderColor=''}});
 const stp=c=>c.type==='steps'||c.type==='outline'||c.type==='dispute';
 const lvl=x=>{const m=x.match(/^[ \t]*/)[0].replace(/\t/g,'  ').length;if(m)return Math.min(5,Math.floor(m/2));const t=x.trim();return /^[IVX]+\./.test(t)?0:/^\d+\./.test(t)?1:/^[a-z]\)/.test(t)?2:/^[a-z]{2}\)/.test(t)?3:0};
 const stepHTML=(c,L,n)=>c.type==='outline'?`<div class=ol2>${L.slice(0,n).map(x=>`<div style="padding-left:${lvl(x)*18}px">${fmt(x.trim())}</div>`).join('')}</div>`:c.type==='dispute'?`<div class=ds>${L.slice(0,n).map(x=>{const m=x.match(/^([^:]{2,40}):\s*(.*)$/);return m?`<b>${esc(m[1])}</b>${fmt(m[2])}`:fmt(x)}).join('')}</div>`:`<ol>${L.slice(0,n).map(x=>`<li>${fmt(x)}</li>`).join('')}</ol>`;
-function applyLook(){const s=settings(),r=document.documentElement.style;r.setProperty('--cf',s.font==='sans'?'system-ui,sans-serif':"Georgia,'Iowan Old Style','Times New Roman',serif");r.setProperty('--fs',(s.fs||19)+'px')}
+function applyLook(){const s=settings(),r=document.documentElement.style,dk=s.theme==='dark'||(s.theme!=='light'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.dataset.theme=s.theme==='dark'||s.theme==='light'?s.theme:'';r.setProperty('--acc',(ACC[s.accent]||ACC.Teal)[dk?1:0]);r.setProperty('--accfg',dk?'#0d1a19':'#fff');r.setProperty('--cf',s.font==='sans'?'system-ui,sans-serif':"Georgia,'Iowan Old Style','Times New Roman',serif");r.setProperty('--fs',(s.fs||19)+'px')}
 const isWeak=c=>c.reps>0&&(c.lapses||0)>=2;
 const weakList=()=>liveCards().filter(inFilter).filter(isWeak).sort((a,b)=>(b.lapses||0)-(a.lapses||0)).slice(0,30);
 const aheadList=()=>{const t=today();return liveCards().filter(inFilter).filter(c=>c.reps>0&&c.due>t).sort((a,b)=>a.due-b.due).slice(0,40)};
@@ -390,12 +429,12 @@ function learnView(){
   const tags=allTags(),topt=tags.length?`<select onchange="tagFilter=this.value;render()"><option value="">Alle Tags</option>${tags.map(t=>`<option ${tagFilter===t?'selected':''} value="${esc(t)}">${esc(t)}</option>`).join('')}</select>`:'';
   if(!cur){
     const s=dueSets(),n=s.rev.length+s.fresh.length,wait=s.freshTotal-s.fresh.length;
-    return `<select onchange="filter=this.value;render()">${opts}</select>${topt}${examBox()}
+    return `<select onchange="filter=this.value;render()">${opts}</select>${topt}${examBox()}${ringBox()}
     <p>${n?`<b>${n}</b> Karten heute: ${s.rev.length} Wiederholungen, ${s.fresh.length} neue.`:'Heute ist nichts fällig.'}${wait?` <span class=mute>${wait} weitere neue warten wegen des Tageslimits (${settings().newPerDay}).</span>`:''}</p>
     ${n?'<button class=b onclick=start()>Lernen starten</button>':''}${practiceBtns()}${undo.length?'<button class="b g" onclick=undoLast()>↶ Letzte Bewertung rückgängig</button>':''}${backupNag()}`}
   const L=stp(cur)?lines(cur):[];
   const done=stp(cur)?step>=L.length:shown;
-  let h=`<div class=top><button class="b g s" onclick="cur=null;queue=[];render()">✕ Beenden</button><span class=mute>${queue.length+1} übrig</span></div><div class=card>`;
+  let h=`<div class=top><button class="b g s" onclick="cur=null;queue=[];render()">✕ Beenden</button><span class=mute>${queue.length+1} übrig</span></div><div class="card${anim?' in':''}">`;anim=false;
   if(cur.type==='cloze')h+=cloze(cur.front,shown)+(shown&&cur.back?`<hr>${fmt(cur.back)}`:'');
   else if(stp(cur))h+=fmt(cur.front)+stepHTML(cur,L,step);
   else h+=fmt(cur.front)+(shown?`<hr>${fmt(cur.back)}`:'');
@@ -562,6 +601,10 @@ function dataView(){
   <p class=mute>Kartenschrift und Größe:</p>
   <select onchange="setSetting('font',this.value);render()"><option value=serif ${s.font!=='sans'?'selected':''}>Serifenschrift</option><option value=sans ${s.font==='sans'?'selected':''}>Serifenlos</option></select>
   <select onchange="setSetting('fs',+this.value);render()">${[[17,'Klein'],[19,'Mittel'],[22,'Groß']].map(([v,n])=>`<option value=${v} ${(s.fs||19)===v?'selected':''}>${n}</option>`).join('')}</select>
+  <p class=mute>Design und Akzentfarbe:</p>
+  <select onchange="setSetting('theme',this.value);render()">${[['auto','Automatisch'],['light','Hell'],['dark','Dunkel']].map(([v,n])=>`<option value=${v} ${(s.theme||'auto')===v?'selected':''}>${n}</option>`).join('')}</select>
+  <select onchange="setSetting('accent',this.value);render()">${Object.keys(ACC).map(k=>`<option ${(s.accent||'Teal')===k?'selected':''}>${k}</option>`).join('')}</select>
+  <p class=mute>Zahl am App-Symbol (fällige Karten):</p><button class="b g" onclick="enableBadge()">Aktivieren</button>
   <h3>Backup</h3>
   <p>${d===null?'Noch kein Backup gemacht.':`Letztes Backup: vor ${d} Tag(en).`} Sichere regelmäßig eine Datei, zusätzlich zur Cloud. Sie enthält Karten, Lernverlauf und Einstellungen.</p>
   <button class=b onclick=exp()>Backup exportieren</button>
@@ -633,7 +676,7 @@ async function ankiOut(kind){
 
 function render(){
   if(!ready){$('#app').innerHTML='<p class=mute>Lädt …</p>';return}
-  applyLook();const focus=tab==='learn'&&!!cur;$('#nav').innerHTML=focus?'':[['learn','Lernen'],['cards','Karten'],['stats','Statistik'],['data','Daten']].map(([k,v])=>`<button class="${tab===k?'on':''}" onclick="tab='${k}';cur=null;render()">${v}</button>`).join('');
+  const sp=$('#splash');if(sp){sp.classList.add('off');setTimeout(()=>sp.remove(),400)}applyLook();const focus=tab==='learn'&&!!cur;$('#nav').innerHTML=focus?'':NAVS.map(([k,v,i])=>`<button class="${tab===k?'on':''}" onclick="tab='${k}';cur=null;render()"><svg viewBox="0 0 24 24" width=24 height=24 fill=none stroke=currentColor stroke-width=1.8 stroke-linecap=round stroke-linejoin=round>${i}</svg>${v}</button>`).join('');
   $('#app').innerHTML={learn:learnView,cards:cardsView,stats:statsView,data:dataView}[tab]()+(focus?'':`<p class=mute id=st>${esc(statusText())}</p>`);
   if(tab==='cards'&&liveDecks().length)hint();
 }
