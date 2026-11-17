@@ -69,6 +69,16 @@ nav button.on{color:var(--acc)}
 .ringw{display:flex;align-items:center;gap:14px;margin:10px 0}
 .fin{text-align:center;margin:14px 0}.fin path{stroke-dasharray:30;stroke-dashoffset:30;animation:dr .6s .1s forwards}
 @keyframes dr{to{stroke-dashoffset:0}}
+.crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:2px;font-size:14px;margin:2px 0 6px}
+.cr{background:none;border:0;color:var(--acc);padding:6px 4px;min-height:36px;font:inherit}.cr:disabled{color:var(--mute)}
+.nr{display:flex;align-items:center;gap:10px;padding:12px 2px;border-bottom:1px solid var(--line);cursor:pointer}
+.nr .ic{font-size:24px}.nr .tx{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.nr small{display:block;color:var(--mute);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pick{width:100%;text-align:left;display:flex;flex-direction:column;gap:2px;padding:12px 14px;margin:4px 0 8px}
+.pick b{font-size:17px}.pick small{color:var(--mute)}
+#sheet{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.45);display:flex;align-items:flex-end}
+.sh{width:100%;max-width:640px;margin:0 auto;background:var(--surf);border-radius:18px 18px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:8px;max-height:85vh}
+.sh .list{overflow:auto;max-height:48vh}
 </style></head><body>
 <div id="splash"><b>§</b><p>Karten</p></div>
 <div id="upd" class="banner" hidden><span>Neue Version verfügbar.</span><button onclick="location.reload()">Neu laden</button></div>
@@ -77,7 +87,7 @@ nav button.on{color:var(--acc)}
 <script>
 /* Die Firebase-Zugangsdaten stehen in der Datei config.js (einmal anlegen, bleibt bei Updates unberührt). */
 const CFG=window.CFG||{};
-const APP_V='2.5';
+const APP_V='2.6';
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -427,8 +437,8 @@ const mmss=ms=>{const t=Math.max(0,Math.ceil(ms/1000));return String(Math.floor(
 const cardHTML=(c,full)=>c.type==='cloze'?cloze(c.front,full)+(full&&c.back?`<hr>${fmt(c.back)}`:''):stp(c)?fmt(c.front)+(full?stepHTML(c,lines(c),lines(c).length):''):fmt(c.front)+(full?`<hr>${fmt(c.back)}`:'');
 function xdOpts(){const dc=deckCounts();return '<option value=all>Alle Ordner und Stapel</option>'+liveDecks().map(d=>`<option value=${d.id} ${filter===d.id?'selected':''}>${'\u00a0\u00a0'.repeat(d.name.split('::').length-1)}${esc(d.name.split('::').pop())} (${(dc[d.name]||{tot:0}).tot} Karten)</option>`).join('')}
 function examSetup(){const opt=(a,sel,u)=>a.map(v=>`<option value=${v} ${v===sel?'selected':''}>${v} ${u}</option>`).join('');
- return `<details><summary>Klausur-Simulation</summary><p class=mute>Zufällige Karten mit Zeitlimit. Wähle einen Ordner (dann zählen alle Unterordner und Stapel darin) oder einen einzelnen Stapel. Du bewertest dich selbst, der Lernplan bleibt unberührt.</p><select id=xd>${xdOpts()}</select><select id=xn>${opt([10,20,30,50],20,'Karten')}</select><select id=xm>${opt([10,20,30,45,60],30,'Minuten')}</select><button class=b onclick="examStart()">Klausur starten</button></details>`}
-function examStart(){const n=+$('#xn').value,m=+$('#xm').value,id=$('#xd').value,f=M.decks.get(id),l=liveCards().filter(c=>{if(id==='all')return true;const d=M.decks.get(c.deck);return !!f&&!!d&&inSub(d.name,f.name)}).sort(()=>Math.random()-.5).slice(0,n);
+ return `<details ${examOpen?'open':''} ontoggle="examOpen=this.open"><summary>Klausur-Simulation</summary><p class=mute>Zufällige Karten mit Zeitlimit. Wähle einen Ordner (dann zählen alle Unterordner und Stapel darin) oder einen einzelnen Stapel. Du bewertest dich selbst, der Lernplan bleibt unberührt.</p><button class="b g pick" onclick="pickSheet(id=>{xdSel=id;examOpen=true;render()},xdSel)"><span class=mute>Prüfungsstoff</span><b>${selLabel(xdSel)} ▾</b></button><select id=xn>${opt([10,20,30,50],20,'Karten')}</select><select id=xm>${opt([10,20,30,45,60],30,'Minuten')}</select><button class=b onclick="examStart()">Klausur starten</button></details>`}
+function examStart(){const n=+$('#xn').value,m=+$('#xm').value,id=xdSel,f=M.decks.get(id),l=liveCards().filter(c=>{if(id==='all')return true;const d=M.decks.get(c.deck);return !!f&&!!d&&inSub(d.name,f.name)}).sort(()=>Math.random()-.5).slice(0,n);
  if(!l.length)return alert('Keine Karten im gewählten Bereich.');
  exam={list:l,i:0,shown:false,ok:[],bad:[],start:Date.now(),end:Date.now()+m*6e4,done:false};
  exam.t=setInterval(()=>{if(!exam){return}if(!exam.done&&Date.now()>=exam.end){examFinish()}else{const e=$('#tm');if(e)e.textContent=mmss(exam.end-Date.now())}},1000);render()}
@@ -448,7 +458,7 @@ function learnView(){
   const tags=allTags(),topt=tags.length?`<select onchange="tagFilter=this.value;render()"><option value="">Alle Tags</option>${tags.map(t=>`<option ${tagFilter===t?'selected':''} value="${esc(t)}">${esc(t)}</option>`).join('')}</select>`:'';
   if(!cur){
     const s=dueSets(),n=s.rev.length+s.fresh.length,wait=s.freshTotal-s.fresh.length;
-    return `<select onchange="filter=this.value;render()">${opts}</select>${topt}${examBox()}${ringBox()}
+    return `${pickBtn()}${topt}${examBox()}${ringBox()}
     <p>${n?`<b>${n}</b> Karten heute: ${s.rev.length} Wiederholungen, ${s.fresh.length} neue.`:'Heute ist nichts fällig.'}${wait?` <span class=mute>${wait} weitere neue warten wegen des Tageslimits (${settings().newPerDay}).</span>`:''}</p>
     ${n?'<button class=b onclick=start()>Lernen starten</button>':''}${practiceBtns()}${examSetup()}${undo.length?'<button class="b g" onclick=undoLast()>↶ Letzte Bewertung rückgängig</button>':''}${backupNag()}`}
   const L=stp(cur)?lines(cur):[];
@@ -467,42 +477,59 @@ function learnView(){
 }
 
 /* ---------- Karten verwalten ---------- */
-function listHTML(){
-  const t=q.trim().toLowerCase();
-  const all=liveCards().filter(c=>!t||c.front.toLowerCase().includes(t)||(c.back||'').toLowerCase().includes(t)||(c.tags||[]).some(x=>x.toLowerCase().includes(t)))
-    .sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
-  return all.slice(0,100).map(c=>{const d=M.decks.get(c.deck);return `<div class=row><span onclick="editId='${c.id}';render();scrollTo(0,0)">${esc(c.front.slice(0,70))}<small>${d&&!d.deleted?deckLabel(d):''}${(c.tags||[]).length?' · '+esc(c.tags.join(', ')):''}</small></span><button class="b g s" onclick="del('${c.id}')">Löschen</button></div>`}).join('')
-    +(all.length>100?`<p class=mute>${all.length-100} weitere Karten. Mit der Suche eingrenzen.</p>`:'');
-}
-function refreshList(){const l=$('#lst'),n=$('#cnt');if(l)l.innerHTML=listHTML();if(n)n.textContent=liveCount()}
-function addFolder(){const n=$('#dn').value.replace(/::/g,' ').trim();if(!n)return;if(liveDecks().some(d=>d.name===n))return alert('Diesen Namen gibt es schon.');const d={id:uid(),name:n,folder:1};setLocal('decks',d);persist('decks',d);render()}
-function newIn(id,f){const p=M.decks.get(id);if(!p)return;const s=(prompt(f?'Name des Unterordners:':'Name des Stapels:')||'').replace(/::/g,' ').trim();if(!s)return;const n=p.name+'::'+s;if(liveDecks().some(d=>d.name===n))return alert('Diesen Namen gibt es schon.');const d={id:uid(),name:n};if(f)d.folder=1;setLocal('decks',d);persist('decks',d);render()}
-function deckManage(){
-  const dc=deckCounts(),L=liveDecks();
-  return `<details open><summary>Ordner und Stapel</summary>${L.map(d=>{const dep=d.name.split('::').length-1,leaf=esc(d.name.split('::').pop()),fo=d.folder||L.some(x=>x.name.startsWith(d.name+'::'));
-  return `<div class=row style="padding-left:${dep*16}px;flex-wrap:wrap"><span style="flex:1 1 100%">${fo?'📁':'🗂️'} ${leaf}<small>${(dc[d.name]||{tot:0}).tot} Karten</small></span><div class=acts style="flex-wrap:wrap">${fo?`<button class="b g s" onclick="newIn('${d.id}',0)">＋ Stapel</button><button class="b g s" onclick="newIn('${d.id}',1)">＋ Ordner</button>`:''}<button class="b g s" onclick="renameDeck('${d.id}')">Umbenennen</button><button class="b g s" onclick="deleteDeck('${d.id}')">Löschen</button></div></div>`}).join('')}</details>`;
-}
+let loc='',cview='browse',formDeck='',xdSel='all',examOpen=false,pickCb=null,pickLoc='',SH=null,ASKCB=null,flash='';
+const kids=id=>{const p=id&&M.decks.get(id)?M.decks.get(id).name:'';return liveDecks().filter(d=>!p?!d.name.includes('::'):d.name.startsWith(p+'::')&&d.name.slice(p.length+2).indexOf('::')<0).sort((a,b)=>a.name.localeCompare(b.name,'de'))};
+const isFolder=d=>!!d.folder||liveDecks().some(x=>x.name.startsWith(d.name+'::'));
+const crumbs=(id,fn)=>{let h=`<button class=cr onclick="${fn}('')">Alle</button>`;const d=id?M.decks.get(id):null;if(d){const seg=d.name.split('::');seg.forEach((t,i)=>{const x=liveDecks().find(z=>z.name===seg.slice(0,i+1).join('::'));h+=` › <button class=cr ${x?`onclick="${fn}('${x.id}')"`:'disabled'}>${esc(t)}</button>`})}return h};
+const selLabel=id=>{const d=id!=='all'&&M.decks.get(id);return d&&!d.deleted?deckLabel(d):'Alle Karten'};
+function closeSheet(){const o=$('#sheet');if(o)o.remove()}
+function openSheet(html){closeSheet();const o=document.createElement('div');o.id='sheet';o.onclick=e=>{if(e.target===o)closeSheet()};o.innerHTML='<div class=sh>'+html+'</div>';document.body.appendChild(o)}
+function sheet(t,items){SH=items.map(x=>x[1]);openSheet(`<b>${esc(t)}</b>`+items.map((x,i)=>`<button class="b g" onclick="closeSheet();SH[${i}]()">${x[0]}</button>`).join('')+'<button class="b g" onclick="closeSheet()">Abbrechen</button>')}
+function askName(t,def,cb){ASKCB=cb;openSheet(`<b>${esc(t)}</b><input id=asknm value="${esc(def||'')}" autocomplete=off><button class=b onclick="askOK()">Speichern</button><button class="b g" onclick="closeSheet()">Abbrechen</button>`);setTimeout(()=>{const i=$('#asknm');if(i){i.focus();i.select()}},60)}
+function askOK(){const v=$('#asknm').value;closeSheet();ASKCB(v)}
+function goLoc(id){loc=id;q='';cview='browse';render();scrollTo(0,0)}
+function mk(f){askName(f?'Name des Ordners':'Name des Stapels','',v=>{const t=v.replace(/::/g,' ').trim();if(!t)return;const pa=loc?M.decks.get(loc):null,n=pa?pa.name+'::'+t:t;if(liveDecks().some(d=>d.name===n))return alert('Diesen Namen gibt es schon.');const d={id:uid(),name:n};if(f)d.folder=1;setLocal('decks',d);persist('decks',d);render()})}
+function addMenu(){const c=loc?M.decks.get(loc):null,it=[['📁 Neuer Ordner',()=>mk(1)],['🗂️ Neuer Stapel',()=>mk(0)]];if(c&&!c.folder)it.push(['📝 Neue Karte',()=>openForm('')]);sheet(c?c.name.split('::').pop():'Neu anlegen',it)}
+function rowMenu(id){const d=M.decks.get(id);if(d)sheet(d.name.split('::').pop(),[['✏️ Umbenennen',()=>renameDeck(id)],['🗑 Löschen',()=>deleteDeck(id)]])}
+function openForm(id){editId=id||null;cview='form';formDeck=id?'':(loc&&M.decks.get(loc)&&!M.decks.get(loc).folder?loc:formDeck);render();scrollTo(0,0)}
+function closeForm(){cview='browse';editId=null;render()}
+const TL={basic:'',cloze:'Lücke',steps:'Stufen',outline:'Gliederung',dispute:'Streit'};
+function cardRows(l,path){return l.map(c=>{const d=M.decks.get(c.deck);return `<div class=nr onclick="openForm('${c.id}')"><span class=tx>${esc(c.front.replace(/\{\{c\d+::(.*?)\}\}/g,'[$1]').slice(0,80))}<small>${path&&d?deckLabel(d)+' · ':''}${TL[c.type]?TL[c.type]+' · ':''}${esc((c.tags||[]).join(', '))}</small></span><button class="b g s" onclick="event.stopPropagation();del('${c.id}')">🗑</button></div>`}).join('')}
+function browseHTML(){
+  const t=q.trim().toLowerCase(),c0=loc?M.decks.get(loc):null,dc=deckCounts();
+  if(t){const r=liveCards().filter(c=>c.front.toLowerCase().includes(t)||(c.back||'').toLowerCase().includes(t)||(c.tags||[]).some(x=>x.toLowerCase().includes(t))).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));return (cardRows(r.slice(0,100),true)||'<p class=mute>Nichts gefunden.</p>')+(r.length>100?`<p class=mute>${r.length-100} weitere. Suche eingrenzen.</p>`:'')}
+  let h=kids(loc).map(d=>{const f=isFolder(d),k=dc[d.name]||{tot:0,rev:0};return `<div class=nr onclick="goLoc('${d.id}')"><span class=ic>${f?'📁':'🗂️'}</span><span class=tx>${esc(d.name.split('::').pop())}<small>${f?kids(d.id).length+' Einträge · ':''}${k.tot} Karten${k.rev?' · '+k.rev+' fällig':''}</small></span><button class="b g s" onclick="event.stopPropagation();rowMenu('${d.id}')">⋯</button><span class=mute>›</span></div>`}).join('');
+  if(c0){if(!c0.folder)h+=`<button class=b style="margin:12px 0" onclick="openForm('')">＋ Karte in diesem Stapel</button>`;h+=cardRows(liveCards().filter(c=>c.deck===loc).sort((a,b)=>(b.created||0)-(a.created||0)),false)}
+  return h||'<p class=mute>Noch leer. Tippe oben auf „＋ Neu“, um einen Ordner oder Stapel anzulegen, zum Beispiel „Strafrecht“.</p>'}
+function refreshList(){const l=$('#bw');if(l)l.innerHTML=browseHTML()}
 function cardsView(){
-  const decks=liveDecks(),dks=decks.filter(d=>!d.folder);
-  const e=M.cards.get(editId)||{type:'basic',front:'',back:'',tags:[],deck:(filter!=='all'&&M.decks.get(filter)&&!M.decks.get(filter).folder)?filter:dks[0]?.id};
-  const dk=`<input id=dn placeholder="Name, z. B. Strafrecht"><button class=b onclick=addFolder()>📁 Ordner anlegen</button><button class="b g" onclick=addDeck()>Stapel anlegen</button>`;
-  if(!dks.length)return `<p>Lege zuerst einen Ordner an (z. B. Strafrecht) und darin einen Stapel mit „＋ Stapel“. Oder direkt einen einzelnen Stapel.</p>${dk}${deckManage()}`;
-  return `${dk}${deckManage()}<hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
-  <select id=cd>${dks.map(d=>`<option value=${d.id} ${e.deck===d.id?'selected':''}>${deckLabel(d)}</option>`).join('')}</select>
-  <select id=ct onchange="hint()">${Object.entries(TYPES).map(([k,v])=>`<option value=${k} ${e.type===k?'selected':''}>${v}</option>`).join('')}</select>
+  if(cview==='form')return formView();
+  const c0=loc?M.decks.get(loc):null;if(loc&&(!c0||c0.deleted)){loc='';return cardsView()}
+  return `<div class=crumbs>${crumbs(loc,'goLoc')}</div><div class=top><h2 style="margin:4px 0">${c0?esc(c0.name.split('::').pop()):'Meine Karten'}</h2><button class="b s" onclick="addMenu()">＋ Neu</button></div><input id=qs placeholder="Alle Karten durchsuchen" value="${esc(q)}" oninput="q=this.value;refreshList()"><div id=bw>${browseHTML()}</div>`}
+function formView(){
+  const dks=liveDecks().filter(d=>!d.folder).sort((a,b)=>a.name.localeCompare(b.name,'de'));
+  if(!dks.length){cview='browse';return cardsView()}
+  const e=M.cards.get(editId)||{type:'basic',front:'',back:'',tags:[],deck:dks.some(d=>d.id===formDeck)?formDeck:dks[0].id};
+  const fl=flash;flash='';
+  return `<div class=top><button class="b g s" onclick="closeForm()">‹ Zurück</button><b>${editId?'Karte bearbeiten':'Neue Karte'}</b></div>${fl?`<p><b>${fl}</b></p>`:''}
+  <p class=mute style="margin:8px 0 0">Stapel</p><select id=cd onchange="formDeck=this.value">${dks.map(d=>`<option value=${d.id} ${e.deck===d.id?'selected':''}>${deckLabel(d)}</option>`).join('')}</select>
+  <p class=mute style="margin:0">Kartentyp</p><select id=ct onchange="hint()">${Object.entries(TYPES).map(([k,v])=>`<option value=${k} ${e.type===k?'selected':''}>${v}</option>`).join('')}</select>
   <textarea id=cf placeholder="Vorderseite / Frage / Lückentext">${esc(e.front)}</textarea>
   <textarea id=cb placeholder="Rückseite / Punkte">${esc(e.back)}</textarea>
   <input id=ctg placeholder="Tags, durch Komma getrennt (z. B. Klausur, § 212)" value="${esc((e.tags||[]).join(', '))}">
   <p class=mute id=h></p>
-  <button class=b onclick=saveCard()>${editId?'Änderung speichern':'Karte speichern'}</button>${editId?'<button class="b g" onclick="editId=null;render()">Abbrechen</button>':''}
+  <button class=b onclick=saveCard()>${editId?'Änderung speichern':'Karte speichern'}</button>
   <details><summary>Mehrere Karten auf einmal anlegen</summary>
     <p class=mute>Eine Karte pro Zeile: <b>Vorderseite | Rückseite</b> (mit Leerzeichen um den Strich). Zeilen mit {{c1::…}} werden Lückentext. Stapel und Tags wie oben eingestellt.</p>
     <textarea id=bulk placeholder="Was ist Vorsatz? | Wissen und Wollen der Tatbestandsverwirklichung"></textarea>
-    <button class="b g" onclick=bulkAdd()>Karten anlegen</button></details>
-  <h3>Karten (<span id=cnt>${liveCount()}</span>)</h3>
-  <input id=qs placeholder="Karten durchsuchen (Text oder Tag)" value="${esc(q)}" oninput="q=this.value;refreshList()">
-  <div id=lst>${listHTML()}</div>`;
-}
+    <button class="b g" onclick=bulkAdd()>Karten anlegen</button></details>`}
+function pickSheet(cb,start){pickCb=cb;const d=start&&start!=='all'?M.decks.get(start):null;pickLoc=d&&isFolder(d)?start:'';drawPick(true)}
+function pickGo(id){pickLoc=id;drawPick(false)}
+function pickDone(id){closeSheet();pickCb(id)}
+function drawPick(isNew){const dc=deckCounts(),p=pickLoc?M.decks.get(pickLoc):null;
+  const html=`<b>Was möchtest du üben?</b><div class=crumbs>${crumbs(pickLoc,'pickGo')}</div><button class=b onclick="pickDone('${pickLoc||'all'}')">▶ ${p?'Alles in „'+esc(p.name.split('::').pop())+'“ ('+((dc[p.name]||{tot:0}).tot)+' Karten)':'Alle Karten'}</button><div class=list>${kids(pickLoc).map(d=>{const f=isFolder(d),k=dc[d.name]||{tot:0,rev:0,neu:0};return `<div class=nr onclick="${f?`pickGo('${d.id}')`:`pickDone('${d.id}')`}"><span class=ic>${f?'📁':'🗂️'}</span><span class=tx>${esc(d.name.split('::').pop())}<small>${k.tot} Karten · ${k.rev} fällig · ${k.neu} neu</small></span><span class=mute>${f?'›':''}</span></div>`}).join('')}</div><button class="b g" onclick="closeSheet()">Abbrechen</button>`;
+  if(isNew||!$('#sheet'))openSheet(html);else $('#sheet .sh').innerHTML=html}
+function pickBtn(){const d=filter!=='all'?M.decks.get(filter):null,k=d?(deckCounts()[d.name]||{rev:0,neu:0}):null;return `<button class="b g pick" onclick="pickSheet(id=>{filter=id;render()},filter)"><span class=mute>Auswahl</span><b>${selLabel(filter)} ▾</b>${k?`<small>${k.rev} fällig · ${k.neu} neu</small>`:''}</button>`}
 function hint(){const t=$('#ct').value;$('#h').textContent={basic:'Normale Karte: Frage vorn, Antwort hinten. Formatierung: **fett**, *kursiv*.',cloze:'Lücken so schreiben: Der {{c1::Vorsatz}} umfasst Wissen und Wollen. Rückseite ist optional.',steps:'Hinten: ein Prüfungsschritt pro Zeile. Beim Lernen deckst du sie nacheinander auf.',outline:'Hinten: deine Gliederung, eine Zeile pro Punkt. Einrückung mit Leerzeichen; I., 1. und a) werden sonst automatisch eingerückt. Beim Lernen deckst du sie nacheinander auf.',dispute:'Hinten: ein Block pro Zeile, z. B. „Meinung A: …“. Der Teil vor dem Doppelpunkt wird als Überschrift gezeigt.'}[t];if(t==='dispute'&&!$('#cb').value)$('#cb').value='Streitstand: \nMeinung A: \nMeinung B: \nRechtsprechung: \nStellungnahme: '}
 function ensureDeck(name){
   const parts=name.split('::');let last=null;
@@ -519,9 +546,10 @@ function addDeck(){
   if(liveDecks().some(d=>d.name===n))return alert('Diesen Stapel gibt es schon.');
   ensureDeck(n);render();
 }
-function renameDeck(id){
+function renameDeck(id){const d=M.decks.get(id);if(d)askName('Neuer Name',d.name.split('::').pop(),v=>renameDeck2(id,v))}
+function renameDeck2(id,v){
   const d=M.decks.get(id);if(!d)return;
-  const pp=d.name.split('::'),leaf=(prompt('Neuer Name:',pp.pop())||'').replace(/::/g,' ').trim(),n=leaf?[...pp,leaf].join('::'):'';
+  const pp=d.name.split('::'),leaf=((pp.pop(),v)||'').replace(/::/g,' ').trim(),n=leaf?[...pp,leaf].join('::'):'';
   if(!n||n===d.name)return;
   const sub=liveDecks().filter(x=>inSub(x.name,d.name));
   const clash=liveDecks().find(x=>!sub.includes(x)&&sub.some(s=>n+s.name.slice(d.name.length)===x.name));
@@ -542,8 +570,8 @@ function saveCard(){
   const f=$('#cf').value.trim(),b=$('#cb').value.trim(),t=$('#ct').value,tags=parseTags($('#ctg').value);
   if(!f||(t!=='cloze'&&!b))return alert('Bitte Vorder- und Rückseite ausfüllen.');
   if(t==='cloze'&&!/\{\{c\d+::/.test(f))return alert('Mindestens eine Lücke nötig: {{c1::Text}}');
-  if(editId){const c=M.cards.get(editId);Object.assign(c,{deck:$('#cd').value,type:t,front:f,back:b,tags});persist('cards',c);editId=null}
-  else{const c={id:uid(),deck:$('#cd').value,type:t,front:f,back:b,tags,reps:0,due:today(),created:Date.now()};setLocal('cards',c);persist('cards',c)}
+  if(editId){const c=M.cards.get(editId);Object.assign(c,{deck:$('#cd').value,type:t,front:f,back:b,tags});persist('cards',c);editId=null;cview='browse'}
+  else{const c={id:uid(),deck:$('#cd').value,type:t,front:f,back:b,tags,reps:0,due:today(),created:Date.now()};setLocal('cards',c);persist('cards',c);formDeck=c.deck;flash='Gespeichert ✓ – nächste Karte:'}
   render()}
 function bulkAdd(){
   const rows=$('#bulk').value.split('\n').map(x=>x.trim()).filter(Boolean),dk=$('#cd').value,tags=parseTags($('#ctg').value);
