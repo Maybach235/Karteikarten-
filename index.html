@@ -77,7 +77,7 @@ nav button.on{color:var(--acc)}
 <script>
 /* Die Firebase-Zugangsdaten stehen in der Datei config.js (einmal anlegen, bleibt bei Updates unberührt). */
 const CFG=window.CFG||{};
-const APP_V='2.4';
+const APP_V='2.5';
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -425,9 +425,10 @@ function weakHTML(){
 let exam=null;
 const mmss=ms=>{const t=Math.max(0,Math.ceil(ms/1000));return String(Math.floor(t/60)).padStart(2,'0')+':'+String(t%60).padStart(2,'0')};
 const cardHTML=(c,full)=>c.type==='cloze'?cloze(c.front,full)+(full&&c.back?`<hr>${fmt(c.back)}`:''):stp(c)?fmt(c.front)+(full?stepHTML(c,lines(c),lines(c).length):''):fmt(c.front)+(full?`<hr>${fmt(c.back)}`:'');
+function xdOpts(){const dc=deckCounts();return '<option value=all>Alle Ordner und Stapel</option>'+liveDecks().map(d=>`<option value=${d.id} ${filter===d.id?'selected':''}>${'\u00a0\u00a0'.repeat(d.name.split('::').length-1)}${esc(d.name.split('::').pop())} (${(dc[d.name]||{tot:0}).tot} Karten)</option>`).join('')}
 function examSetup(){const opt=(a,sel,u)=>a.map(v=>`<option value=${v} ${v===sel?'selected':''}>${v} ${u}</option>`).join('');
- return `<details><summary>Klausur-Simulation</summary><p class=mute>Zufällige Karten aus dem gewählten Ordner oder Stapel, mit Zeitlimit. Du bewertest dich selbst, der Lernplan bleibt unberührt.</p><select id=xn>${opt([10,20,30,50],20,'Karten')}</select><select id=xm>${opt([10,20,30,45,60],30,'Minuten')}</select><button class=b onclick="examStart()">Klausur starten</button></details>`}
-function examStart(){const n=+$('#xn').value,m=+$('#xm').value,l=liveCards().filter(inFilter).sort(()=>Math.random()-.5).slice(0,n);
+ return `<details><summary>Klausur-Simulation</summary><p class=mute>Zufällige Karten mit Zeitlimit. Wähle einen Ordner (dann zählen alle Unterordner und Stapel darin) oder einen einzelnen Stapel. Du bewertest dich selbst, der Lernplan bleibt unberührt.</p><select id=xd>${xdOpts()}</select><select id=xn>${opt([10,20,30,50],20,'Karten')}</select><select id=xm>${opt([10,20,30,45,60],30,'Minuten')}</select><button class=b onclick="examStart()">Klausur starten</button></details>`}
+function examStart(){const n=+$('#xn').value,m=+$('#xm').value,id=$('#xd').value,f=M.decks.get(id),l=liveCards().filter(c=>{if(id==='all')return true;const d=M.decks.get(c.deck);return !!f&&!!d&&inSub(d.name,f.name)}).sort(()=>Math.random()-.5).slice(0,n);
  if(!l.length)return alert('Keine Karten im gewählten Bereich.');
  exam={list:l,i:0,shown:false,ok:[],bad:[],start:Date.now(),end:Date.now()+m*6e4,done:false};
  exam.t=setInterval(()=>{if(!exam){return}if(!exam.done&&Date.now()>=exam.end){examFinish()}else{const e=$('#tm');if(e)e.textContent=mmss(exam.end-Date.now())}},1000);render()}
