@@ -91,7 +91,7 @@ a.nl{color:var(--acc);text-decoration:underline dotted}
 <script>
 /* Die Firebase-Zugangsdaten stehen in der Datei config.js (einmal anlegen, bleibt bei Updates unberührt). */
 const CFG=window.CFG||{};
-const APP_V='2.7';
+const APP_V='2.8';
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -243,7 +243,7 @@ const logout=()=>A.signOut(auth);
 /* Datensatz aus der Cloud mit dem lokalen zusammenführen: der mit dem neueren Änderungszeitstempel gewinnt */
 function mergeIn(kind,id,r){
   const l=M[kind].get(id);
-  r={...r,id};delete r.srv;
+  r={...r,id};delete r.srv;if(Array.isArray(r.e))r.e=r.e.map(v=>typeof v==='string'?JSON.parse(v):v);
   if(!l){M[kind].set(id,r);return r}
   if((l.updatedAt||0)>(r.updatedAt||0)){l.dirty=1;return null}
   Object.keys(l).forEach(k=>delete l[k]);Object.assign(l,r);
@@ -274,7 +274,7 @@ async function pullKind(kind){
   if(max&&(!prev||max[0]!==prev[0]||max[1]!==prev[1])){lastSrv[kind]=max;await idbPut('meta',lastSrv,'lastSrv')}
   return changed;
 }
-const wire=x=>{const o={...x};delete o.dirty;delete o.id;o.srv=D.serverTimestamp();return Object.fromEntries(Object.entries(o).filter(([,v])=>v!==undefined))};
+const wire=x=>{const o={...x};delete o.dirty;delete o.id;if(Array.isArray(o.e))o.e=o.e.map(v=>JSON.stringify(v));o.srv=D.serverTimestamp();return Object.fromEntries(Object.entries(o).filter(([,v])=>v!==undefined))};
 async function push(kind){
   const dirty=S[kind].filter(x=>x.dirty);
   for(let i=0;i<dirty.length;i+=400){
