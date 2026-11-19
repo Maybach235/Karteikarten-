@@ -1,5 +1,5 @@
 /* Bei jeder neuen App-Version die Nummer hochzählen: Das löst auf den Geräten den Hinweis „Neue Version verfügbar“ aus. */
-const V='karten-v10';
+const V='karten-v11';
 const FILES=['./','./index.html','./manifest.webmanifest','./config.js','./icon-180.png','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',e=>{
   e.waitUntil(caches.open(V).then(c=>Promise.all(FILES.map(f=>c.add(new Request(f,{cache:'reload'})).catch(()=>{})))));

@@ -79,6 +79,10 @@ nav button.on{color:var(--acc)}
 #sheet{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.45);display:flex;align-items:flex-end}
 .sh{width:100%;max-width:640px;margin:0 auto;background:var(--surf);border-radius:18px 18px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:8px;max-height:85vh}
 .sh .list{overflow:auto;max-height:48vh}
+a.nl{color:var(--acc);text-decoration:underline dotted}
+.gap:not(.on) a{color:transparent;pointer-events:none}
+.chiprow{display:flex;justify-content:flex-end;font-size:12px;color:var(--mute);margin:-4px 0 2px}
+.selbar{position:sticky;bottom:calc(72px + env(safe-area-inset-bottom,0px));display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:var(--surf);border:1px solid var(--line);border-radius:12px;padding:8px;margin-top:10px}
 </style></head><body>
 <div id="splash"><b>§</b><p>Karten</p></div>
 <div id="upd" class="banner" hidden><span>Neue Version verfügbar.</span><button onclick="location.reload()">Neu laden</button></div>
@@ -87,7 +91,7 @@ nav button.on{color:var(--acc)}
 <script>
 /* Die Firebase-Zugangsdaten stehen in der Datei config.js (einmal anlegen, bleibt bei Updates unberührt). */
 const CFG=window.CFG||{};
-const APP_V='2.6';
+const APP_V='2.7';
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -162,8 +166,8 @@ const pathCmp=(a,b)=>{const x=a.name.split('::'),y=b.name.split('::');for(let i=
 function rebuild(){KINDS.forEach(k=>S[k]=[...M[k].values()]);S.decks.sort(pathCmp)}
 function setLocal(kind,o){M[kind].set(o.id,o);rebuild()}
 /* Jede lokale Änderung: Zeitstempel setzen, als „noch nicht hochgeladen“ markieren, speichern, Sync anstoßen */
-function persist(kind,o){o.updatedAt=Date.now();o.dirty=1;idbPut(kind,o).catch(e=>alert('Lokales Speichern fehlgeschlagen: '+e));kick()}
-function persistMany(kind,arr){const t=Date.now();arr.forEach(o=>{o.updatedAt=t;o.dirty=1});idbPutMany(kind,arr).catch(e=>alert('Lokales Speichern fehlgeschlagen: '+e));kick()}
+function persist(kind,o){o.updatedAt=Date.now();o.dirty=1;idbPut(kind,o).catch(e=>alert('Lokales Speichern fehlgeschlagen: '+e));kick();ui()}
+function persistMany(kind,arr){const t=Date.now();arr.forEach(o=>{o.updatedAt=t;o.dirty=1});idbPutMany(kind,arr).catch(e=>alert('Lokales Speichern fehlgeschlagen: '+e));kick();ui()}
 
 /* Einmalig: Karten aus der allerersten, rein lokalen Version (Datenbank „karten“) übernehmen */
 function readOld(){return new Promise(ok=>{
@@ -198,7 +202,7 @@ const wt=(p,ms=25000)=>Promise.race([p,new Promise((_,no)=>setTimeout(()=>no(new
 const ref=(k,id)=>D.doc(db,'users',user.uid,k,id);
 const dirtyCount=()=>KINDS.reduce((n,k)=>n+S[k].filter(x=>x.dirty).length,0);
 const statusText=()=>!CFG.apiKey?'Nur lokal gespeichert (Cloud nicht eingerichtet).':fbErr?fbErr:!user?'Nicht angemeldet: nur lokal gespeichert.':(syncMsg||'Bereit.');
-function ui(full){const s=$('#st');if(s)s.textContent=statusText();if(full&&tab==='data')render()}
+function ui(full){const ch=$('#chip');if(ch)ch.innerHTML=chipHTML();const s=$('#st');if(s)s.textContent=statusText();if(full&&tab==='data')render()}
 
 async function fbInit(){
   if(!CFG.apiKey)return;
@@ -323,7 +327,9 @@ function inFilter(c){
 const allTags=()=>[...new Set(liveCards().flatMap(c=>c.tags||[]))].sort((a,b)=>a.localeCompare(b,'de'));
 const parseTags=s=>[...new Set(String(s).split(',').map(x=>x.trim()).filter(Boolean))];
 /* Einfache Formatierung: **fett**, *kursiv* */
-const fmt=s=>esc(s).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g,'$1<i>$2</i>');
+const NORM=/(§§?|Art\.)\s*(\d+[a-z]?)((?:\s*(?:Abs\.|Satz|S\.|Nr\.|Var\.|Alt\.|lit\.)\s*\d+[a-z]?)*)((?:\s*[,/]\s*\d+[a-z]?)*)\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöü]{1,9})\b/g;
+const normLink=(m,sym,num,a,b,law)=>(law.match(/[A-ZÄÖÜ]/g)||[]).length<2?m:`<a class=nl href="https://www.gesetze-im-internet.de/${law.toLowerCase()}/${sym==='Art.'?'art_':'__'}${num}.html" target="_blank" rel="noopener">${m}</a>`;
+const fmt=s=>esc(s).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g,'$1<i>$2</i>').replace(NORM,normLink);
 const cloze=(t,show)=>fmt(t).replace(/\{\{c\d+::(.*?)\}\}/g,(m,a)=>show?`<b class=hit>${a}</b>`:'<span class=gap>[…]</span>');
 const lines=c=>c.back.split('\n').filter(x=>x.trim());
 function deckCounts(){
@@ -367,7 +373,7 @@ function dueSets(){
   const fresh=cs.filter(c=>!c.reps).sort(byCreated);
   return{rev,fresh:fresh.slice(0,Math.max(0,settings().newPerDay-intro)),freshTotal:fresh.length};
 }
-function next(){cur=queue.shift()||null;shown=false;step=1;anim=true;render()}
+function next(){cur=queue.shift()||null;shown=false;step=1;anim=true;typed='';render()}
 function start(){const s=dueSets();queue=[...s.rev.sort(()=>Math.random()-.5),...s.fresh];undo=[];redo=new Set();next()}
 /* g: 1 Nochmal, 2 Schwer, 3 Gut, 4 Leicht */
 function rate(g){
@@ -405,10 +411,10 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)setBadge()}
 const isDone=()=>cur&&(stp(cur)?step>=lines(cur).length:shown);
 let gx0=0,gy0=0,gdx=0,gsw=false;
 const APPEL=$('#app');
-APPEL.addEventListener('touchstart',e=>{if(!cur||!e.target.closest('.card'))return;gsw=true;gx0=e.touches[0].clientX;gy0=e.touches[0].clientY;gdx=0},{passive:true});
+APPEL.addEventListener('touchstart',e=>{if(!cur||!e.target.closest('.card')||e.target.closest('a'))return;gsw=true;gx0=e.touches[0].clientX;gy0=e.touches[0].clientY;gdx=0},{passive:true});
 APPEL.addEventListener('touchmove',e=>{if(!gsw)return;gdx=e.touches[0].clientX-gx0;if(Math.abs(e.touches[0].clientY-gy0)>Math.abs(gdx))return;const c=$('.card');if(!c||!isDone())return;c.style.transition='none';c.style.transform=`translateX(${gdx}px) rotate(${gdx/45}deg)`;c.style.borderColor=gdx>40?'#2e9e5b':gdx<-40?'#d9534f':''},{passive:true});
 APPEL.addEventListener('touchend',()=>{if(!gsw)return;gsw=false;const c=$('.card');if(!c||!cur)return;
- if(Math.abs(gdx)<8&&!isDone()){if(stp(cur))step++;else shown=true;render();return}
+ if(Math.abs(gdx)<8&&!isDone()){if(stp(cur))step++;else{typed=($('#ta')||{}).value||'';shown=true}render();return}
  if(Math.abs(gdx)>90&&isDone()){c.style.transform=`translateX(${gdx>0?520:-520}px)`;c.style.opacity=0;const g=gdx>0?3:1;setTimeout(()=>rate(g),170)}
  else{c.style.transform='';c.style.borderColor=''}});
 const stp=c=>c.type==='steps'||c.type==='outline'||c.type==='dispute';
@@ -466,11 +472,11 @@ function learnView(){
   let h=`<div class=top><button class="b g s" onclick="cur=null;queue=[];render()">✕ Beenden</button><span class=mute>${queue.length+1} übrig</span></div><div class="card${anim?' in':''}">`;anim=false;
   if(cur.type==='cloze')h+=cloze(cur.front,shown)+(shown&&cur.back?`<hr>${fmt(cur.back)}`:'');
   else if(stp(cur))h+=fmt(cur.front)+stepHTML(cur,L,step);
-  else h+=fmt(cur.front)+(shown?`<hr>${fmt(cur.back)}`:'');
+  else h+=fmt(cur.front)+(shown?`<hr>${typed?`<p class=mute>Deine Antwort:</p>${esc(typed)}<hr>`:''}${fmt(cur.back)}`:'');
   h+='</div>';
   if(!done)h+=stp(cur)
     ?`<button class=b onclick="step++;render()">Nächster Punkt (${step}/${L.length})</button><button class="b g" onclick="step=${L.length};render()">Alle zeigen</button>`
-    :`<button class=b onclick="shown=true;render()">Antwort zeigen</button>`;
+    :`${cur.type==='basic'&&settings().typeAns?'<textarea id=ta placeholder="Deine Antwort …"></textarea>':''}<button class=b onclick="typed=($('#ta')||{}).value||'';shown=true;render()">Antwort zeigen</button>`;
   else if(redo.has(cur.id))h+=`<div class="rate two"><button class="b g" onclick=rate(1)>Nochmal</button><button class=b onclick=rate(3)>Gewusst</button></div><p class=mute>Wiederholung in dieser Sitzung, ändert den Lernplan nicht.</p>`;
   else{const p=plan(cur);h+=`<div class=rate>${['Nochmal','Schwer','Gut','Leicht'].map((t,i)=>`<button class="b ${i?'':'g'}" onclick=rate(${i+1})>${t}<small>${i?fmtIvl(p[i].ivl):'gleich'}</small></button>`).join('')}</div>`}
   return h+`<p class=mute>Noch ${queue.length} danach</p>${undo.length?'<button class="b g s" onclick=undoLast()>↶ Rückgängig</button>':''}`;
@@ -478,6 +484,19 @@ function learnView(){
 
 /* ---------- Karten verwalten ---------- */
 let loc='',cview='browse',formDeck='',xdSel='all',examOpen=false,pickCb=null,pickLoc='',SH=null,ASKCB=null,flash='';
+let selMode=false,sel=new Set(),shownIds=[],pickMode=0,typed='';
+const AIP='Erstelle aus dem folgenden Text Karteikarten für mein Jurastudium. Format: genau eine Karte pro Zeile als „Vorderseite | Rückseite“ (mit Leerzeichen um den senkrechten Strich). Für Definitionen und Tatbestandsmerkmale nutze Lückentext mit {{c1::Begriff}} in einer einzelnen Zeile. Nur eine Frage pro Karte, Antworten kurz, keine Nummerierung, kein weiterer Text außerhalb der Zeilen. Text:\n\n';
+async function copyPrompt(){try{await navigator.clipboard.writeText(AIP);alert('Kopiert. Füge es im Chat ein und hänge deinen Text an.')}catch{prompt('Kopiere diesen Text:',AIP)}}
+const chipHTML=()=>{const n=dirtyCount();let c,t;if(!CFG.apiKey){c='#98a2b3';t='Nur lokal'}else if(fbErr||(syncMsg||'').startsWith('Sync fehlgeschlagen')){c='#d9534f';t='Sync-Fehler'}else if(!user){c='#98a2b3';t='Nicht angemeldet'}else if(!navigator.onLine){c='#e0a800';t='Offline'+(n?` · ${n} offen`:'')}else if(syncing){c='#2457c5';t='Synchronisiere …'}else if(n){c='#e0a800';t=n+' ausstehend'}else{c='#2e9e5b';t='Synchronisiert'}return `<span style="color:${c}">●</span> ${t}`};
+const selCards=()=>[...sel].map(i=>M.cards.get(i)).filter(Boolean);
+function toggleSel(){selMode=!selMode;sel=new Set();render()}
+function selTap(id){sel.has(id)?sel.delete(id):sel.add(id);refreshList()}
+function selAll(){shownIds.forEach(i=>sel.add(i));refreshList()}
+function selDone(a){persistMany('cards',a);selMode=false;sel=new Set();render()}
+function selMove(){if(!sel.size)return;pickSheet(id=>{const t=M.decks.get(id);if(!t||t.folder)return;const a=selCards();a.forEach(c=>c.deck=id);selDone(a)},'',1)}
+function selTag(){if(!sel.size)return;askName('Tag hinzufügen (mehrere mit Komma)','',v=>{const tg=parseTags(v);if(!tg.length)return;const a=selCards();a.forEach(c=>c.tags=[...new Set([...(c.tags||[]),...tg])]);selDone(a)})}
+function selDel(){if(!sel.size||!confirm(sel.size+' Karten löschen?'))return;const a=selCards();a.forEach(c=>c.deleted=1);selDone(a)}
+const selBar=()=>`<div class=selbar><b>${sel.size} gewählt</b><button class="b g s" onclick="selAll()">Alle</button><button class="b g s" onclick="selMove()">Verschieben</button><button class="b g s" onclick="selTag()">＋ Tag</button><button class="b g s" onclick="selDel()">Löschen</button></div>`;
 const kids=id=>{const p=id&&M.decks.get(id)?M.decks.get(id).name:'';return liveDecks().filter(d=>!p?!d.name.includes('::'):d.name.startsWith(p+'::')&&d.name.slice(p.length+2).indexOf('::')<0).sort((a,b)=>a.name.localeCompare(b.name,'de'))};
 const isFolder=d=>!!d.folder||liveDecks().some(x=>x.name.startsWith(d.name+'::'));
 const crumbs=(id,fn)=>{let h=`<button class=cr onclick="${fn}('')">Alle</button>`;const d=id?M.decks.get(id):null;if(d){const seg=d.name.split('::');seg.forEach((t,i)=>{const x=liveDecks().find(z=>z.name===seg.slice(0,i+1).join('::'));h+=` › <button class=cr ${x?`onclick="${fn}('${x.id}')"`:'disabled'}>${esc(t)}</button>`})}return h};
@@ -494,8 +513,9 @@ function rowMenu(id){const d=M.decks.get(id);if(d)sheet(d.name.split('::').pop()
 function openForm(id){editId=id||null;cview='form';formDeck=id?'':(loc&&M.decks.get(loc)&&!M.decks.get(loc).folder?loc:formDeck);render();scrollTo(0,0)}
 function closeForm(){cview='browse';editId=null;render()}
 const TL={basic:'',cloze:'Lücke',steps:'Stufen',outline:'Gliederung',dispute:'Streit'};
-function cardRows(l,path){return l.map(c=>{const d=M.decks.get(c.deck);return `<div class=nr onclick="openForm('${c.id}')"><span class=tx>${esc(c.front.replace(/\{\{c\d+::(.*?)\}\}/g,'[$1]').slice(0,80))}<small>${path&&d?deckLabel(d)+' · ':''}${TL[c.type]?TL[c.type]+' · ':''}${esc((c.tags||[]).join(', '))}</small></span><button class="b g s" onclick="event.stopPropagation();del('${c.id}')">🗑</button></div>`}).join('')}
-function browseHTML(){
+function cardRows(l,path){shownIds=l.map(c=>c.id);return l.map(c=>{const d=M.decks.get(c.deck);return `<div class=nr onclick="${selMode?`selTap('${c.id}')`:`openForm('${c.id}')`}">${selMode?`<span class=ic>${sel.has(c.id)?'☑️':'⬜'}</span>`:''}<span class=tx>${esc(c.front.replace(/\{\{c\d+::(.*?)\}\}/g,'[$1]').slice(0,80))}<small>${path&&d?deckLabel(d)+' · ':''}${TL[c.type]?TL[c.type]+' · ':''}${esc((c.tags||[]).join(', '))}</small></span>${selMode?'':`<button class="b g s" onclick="event.stopPropagation();del('${c.id}')">🗑</button>`}</div>`}).join('')}
+const browseHTML=()=>browseHTML0()+(selMode?selBar():'');
+function browseHTML0(){
   const t=q.trim().toLowerCase(),c0=loc?M.decks.get(loc):null,dc=deckCounts();
   if(t){const r=liveCards().filter(c=>c.front.toLowerCase().includes(t)||(c.back||'').toLowerCase().includes(t)||(c.tags||[]).some(x=>x.toLowerCase().includes(t))).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));return (cardRows(r.slice(0,100),true)||'<p class=mute>Nichts gefunden.</p>')+(r.length>100?`<p class=mute>${r.length-100} weitere. Suche eingrenzen.</p>`:'')}
   let h=kids(loc).map(d=>{const f=isFolder(d),k=dc[d.name]||{tot:0,rev:0};return `<div class=nr onclick="goLoc('${d.id}')"><span class=ic>${f?'📁':'🗂️'}</span><span class=tx>${esc(d.name.split('::').pop())}<small>${f?kids(d.id).length+' Einträge · ':''}${k.tot} Karten${k.rev?' · '+k.rev+' fällig':''}</small></span><button class="b g s" onclick="event.stopPropagation();rowMenu('${d.id}')">⋯</button><span class=mute>›</span></div>`}).join('');
@@ -505,7 +525,7 @@ function refreshList(){const l=$('#bw');if(l)l.innerHTML=browseHTML()}
 function cardsView(){
   if(cview==='form')return formView();
   const c0=loc?M.decks.get(loc):null;if(loc&&(!c0||c0.deleted)){loc='';return cardsView()}
-  return `<div class=crumbs>${crumbs(loc,'goLoc')}</div><div class=top><h2 style="margin:4px 0">${c0?esc(c0.name.split('::').pop()):'Meine Karten'}</h2><button class="b s" onclick="addMenu()">＋ Neu</button></div><input id=qs placeholder="Alle Karten durchsuchen" value="${esc(q)}" oninput="q=this.value;refreshList()"><div id=bw>${browseHTML()}</div>`}
+  return `<div class=crumbs>${crumbs(loc,'goLoc')}</div><div class=top><h2 style="margin:4px 0">${c0?esc(c0.name.split('::').pop()):'Meine Karten'}</h2><span><button class="b g s" onclick="toggleSel()">${selMode?'Fertig':'Auswählen'}</button> <button class="b s" onclick="addMenu()">＋ Neu</button></span></div><input id=qs placeholder="Alle Karten durchsuchen" value="${esc(q)}" oninput="q=this.value;refreshList()"><div id=bw>${browseHTML()}</div>`}
 function formView(){
   const dks=liveDecks().filter(d=>!d.folder).sort((a,b)=>a.name.localeCompare(b.name,'de'));
   if(!dks.length){cview='browse';return cardsView()}
@@ -521,13 +541,13 @@ function formView(){
   <button class=b onclick=saveCard()>${editId?'Änderung speichern':'Karte speichern'}</button>
   <details><summary>Mehrere Karten auf einmal anlegen</summary>
     <p class=mute>Eine Karte pro Zeile: <b>Vorderseite | Rückseite</b> (mit Leerzeichen um den Strich). Zeilen mit {{c1::…}} werden Lückentext. Stapel und Tags wie oben eingestellt.</p>
-    <textarea id=bulk placeholder="Was ist Vorsatz? | Wissen und Wollen der Tatbestandsverwirklichung"></textarea>
+    <button class="b g" onclick="copyPrompt()">KI-Anweisung kopieren</button><p class=mute>Kopiert eine fertige Anweisung. Füge sie im Chat mit deinem Skripttext ein und übernimm die Antwort hier ins Feld. Prüfe die Karten juristisch.</p><textarea id=bulk placeholder="Was ist Vorsatz? | Wissen und Wollen der Tatbestandsverwirklichung"></textarea>
     <button class="b g" onclick=bulkAdd()>Karten anlegen</button></details>`}
-function pickSheet(cb,start){pickCb=cb;const d=start&&start!=='all'?M.decks.get(start):null;pickLoc=d&&isFolder(d)?start:'';drawPick(true)}
+function pickSheet(cb,start,mode){pickCb=cb;pickMode=mode||0;const d=start&&start!=='all'?M.decks.get(start):null;pickLoc=d&&isFolder(d)?start:'';drawPick(true)}
 function pickGo(id){pickLoc=id;drawPick(false)}
 function pickDone(id){closeSheet();pickCb(id)}
 function drawPick(isNew){const dc=deckCounts(),p=pickLoc?M.decks.get(pickLoc):null;
-  const html=`<b>Was möchtest du üben?</b><div class=crumbs>${crumbs(pickLoc,'pickGo')}</div><button class=b onclick="pickDone('${pickLoc||'all'}')">▶ ${p?'Alles in „'+esc(p.name.split('::').pop())+'“ ('+((dc[p.name]||{tot:0}).tot)+' Karten)':'Alle Karten'}</button><div class=list>${kids(pickLoc).map(d=>{const f=isFolder(d),k=dc[d.name]||{tot:0,rev:0,neu:0};return `<div class=nr onclick="${f?`pickGo('${d.id}')`:`pickDone('${d.id}')`}"><span class=ic>${f?'📁':'🗂️'}</span><span class=tx>${esc(d.name.split('::').pop())}<small>${k.tot} Karten · ${k.rev} fällig · ${k.neu} neu</small></span><span class=mute>${f?'›':''}</span></div>`}).join('')}</div><button class="b g" onclick="closeSheet()">Abbrechen</button>`;
+  const html=`<b>${pickMode?'Verschieben nach …':'Was möchtest du üben?'}</b><div class=crumbs>${crumbs(pickLoc,'pickGo')}</div>${pickMode?'':`<button class=b onclick="pickDone('${pickLoc||'all'}')">▶ ${p?'Alles in „'+esc(p.name.split('::').pop())+'“ ('+((dc[p.name]||{tot:0}).tot)+' Karten)':'Alle Karten'}</button>`}<div class=list>${kids(pickLoc).map(d=>{const f=isFolder(d),k=dc[d.name]||{tot:0,rev:0,neu:0};return `<div class=nr onclick="${f?`pickGo('${d.id}')`:`pickDone('${d.id}')`}"><span class=ic>${f?'📁':'🗂️'}</span><span class=tx>${esc(d.name.split('::').pop())}<small>${k.tot} Karten · ${k.rev} fällig · ${k.neu} neu</small></span><span class=mute>${f?'›':''}</span></div>`}).join('')}</div><button class="b g" onclick="closeSheet()">Abbrechen</button>`;
   if(isNew||!$('#sheet'))openSheet(html);else $('#sheet .sh').innerHTML=html}
 function pickBtn(){const d=filter!=='all'?M.decks.get(filter):null,k=d?(deckCounts()[d.name]||{rev:0,neu:0}):null;return `<button class="b g pick" onclick="pickSheet(id=>{filter=id;render()},filter)"><span class=mute>Auswahl</span><b>${selLabel(filter)} ▾</b>${k?`<small>${k.rev} fällig · ${k.neu} neu</small>`:''}</button>`}
 function hint(){const t=$('#ct').value;$('#h').textContent={basic:'Normale Karte: Frage vorn, Antwort hinten. Formatierung: **fett**, *kursiv*.',cloze:'Lücken so schreiben: Der {{c1::Vorsatz}} umfasst Wissen und Wollen. Rückseite ist optional.',steps:'Hinten: ein Prüfungsschritt pro Zeile. Beim Lernen deckst du sie nacheinander auf.',outline:'Hinten: deine Gliederung, eine Zeile pro Punkt. Einrückung mit Leerzeichen; I., 1. und a) werden sonst automatisch eingerückt. Beim Lernen deckst du sie nacheinander auf.',dispute:'Hinten: ein Block pro Zeile, z. B. „Meinung A: …“. Der Teil vor dem Doppelpunkt wird als Überschrift gezeigt.'}[t];if(t==='dispute'&&!$('#cb').value)$('#cb').value='Streitstand: \nMeinung A: \nMeinung B: \nRechtsprechung: \nStellungnahme: '}
@@ -651,6 +671,7 @@ function dataView(){
   <p class=mute>Kartenschrift und Größe:</p>
   <select onchange="setSetting('font',this.value);render()"><option value=serif ${s.font!=='sans'?'selected':''}>Serifenschrift</option><option value=sans ${s.font==='sans'?'selected':''}>Serifenlos</option></select>
   <select onchange="setSetting('fs',+this.value);render()">${[[17,'Klein'],[19,'Mittel'],[22,'Groß']].map(([v,n])=>`<option value=${v} ${(s.fs||19)===v?'selected':''}>${n}</option>`).join('')}</select>
+  <label style="display:flex;gap:8px;align-items:center;margin:10px 0"><input type=checkbox style="width:auto;margin:0" ${s.typeAns?'checked':''} onchange="setSetting('typeAns',this.checked);render()"> Antwort vor dem Aufdecken tippen (nur normale Karten)</label>
   <p class=mute>Design und Akzentfarbe:</p>
   <select onchange="setSetting('theme',this.value);render()">${[['auto','Automatisch'],['light','Hell'],['dark','Dunkel']].map(([v,n])=>`<option value=${v} ${(s.theme||'auto')===v?'selected':''}>${n}</option>`).join('')}</select>
   <select onchange="setSetting('accent',this.value);render()">${Object.keys(ACC).map(k=>`<option ${(s.accent||'Teal')===k?'selected':''}>${k}</option>`).join('')}</select>
@@ -727,9 +748,10 @@ async function ankiOut(kind){
 function render(){
   if(!ready){$('#app').innerHTML='<p class=mute>Lädt …</p>';return}
   const sp=$('#splash');if(sp){sp.classList.add('off');setTimeout(()=>sp.remove(),400)}applyLook();const focus=tab==='learn'&&(!!cur||!!exam);$('#nav').innerHTML=focus?'':NAVS.map(([k,v,i])=>`<button class="${tab===k?'on':''}" onclick="tab='${k}';cur=null;render()"><svg viewBox="0 0 24 24" width=24 height=24 fill=none stroke=currentColor stroke-width=1.8 stroke-linecap=round stroke-linejoin=round>${i}</svg>${v}</button>`).join('');
-  $('#app').innerHTML={learn:learnView,cards:cardsView,stats:statsView,data:dataView}[tab]()+(focus?'':`<p class=mute id=st>${esc(statusText())}</p>`);
+  $('#app').innerHTML=(focus?'':`<div class=chiprow><span id=chip class=chip>${chipHTML()}</span></div>`)+{learn:learnView,cards:cardsView,stats:statsView,data:dataView}[tab]()+(focus?'':`<p class=mute id=st>${esc(statusText())}</p>`);
   if(tab==='cards'&&$('#ct'))hint();
 }
+addEventListener('online',()=>ui());addEventListener('offline',()=>ui());
 render();boot();
 if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();
 if('serviceWorker'in navigator){
