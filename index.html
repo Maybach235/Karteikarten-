@@ -91,7 +91,7 @@ a.nl{color:var(--acc);text-decoration:underline dotted}
 <script>
 /* Die Firebase-Zugangsdaten stehen in der Datei config.js (einmal anlegen, bleibt bei Updates unberührt). */
 const CFG=window.CFG||{};
-const APP_V='3.1';
+const APP_V='3.2';
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -202,7 +202,7 @@ const wt=(p,ms=25000)=>Promise.race([p,new Promise((_,no)=>setTimeout(()=>no(new
 const ref=(k,id)=>D.doc(db,'users',user.uid,k,id);
 const dirtyCount=()=>KINDS.reduce((n,k)=>n+S[k].filter(x=>x.dirty).length,0);
 const statusText=()=>!CFG.apiKey?'Nur lokal gespeichert (Cloud nicht eingerichtet).':fbErr?fbErr:!user?'Nicht angemeldet: nur lokal gespeichert.':(syncMsg||'Bereit.');
-function ui(full){const ch=$('#chip');if(ch)ch.innerHTML=chipHTML();const s=$('#st');if(s)s.textContent=statusText();if(full&&tab==='data')render()}
+function ui(full){const ch=$('#chip');if(ch)ch.innerHTML=chipHTML();const s=$('#st');if(s)s.textContent=statusText();if(full&&tab==='data'&&!typingNow())render()}
 
 async function fbInit(){
   if(!CFG.apiKey)return;
@@ -245,7 +245,7 @@ function mergeIn(kind,id,r){
   const l=M[kind].get(id);
   r={...r,id};delete r.srv;if(Array.isArray(r.e))r.e=r.e.map(v=>typeof v==='string'?JSON.parse(v):v);
   if(!l){M[kind].set(id,r);return r}
-  if((l.updatedAt||0)>(r.updatedAt||0)){l.dirty=1;return null}
+  if((l.updatedAt||0)>0&&(l.updatedAt||0)>=(r.updatedAt||0)){if((l.updatedAt||0)>(r.updatedAt||0))l.dirty=1;return null}
   Object.keys(l).forEach(k=>delete l[k]);Object.assign(l,r);
   return l;
 }
@@ -306,10 +306,12 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden)sync()});
 setInterval(()=>{if(!document.hidden)sync()},120000);
 
 /* Nach Änderungen von anderen Geräten nur dort neu zeichnen, wo es nicht stört */
+const typingNow=()=>/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement||{}).tagName||'');
 function changed(){
+  if(tab==='cards'||tab==='cases'){if(cview==='form'||typingNow())return;render();return}
+  if(typingNow())return;
   if(tab==='learn'&&!cur)render();
   else if(tab==='data'||tab==='stats')render();
-  else if(tab==='cards'){const s=$('#cd');if(!s||s.options.length!==liveDecks().length)render();else refreshList()}
 }
 
 /* ---------- Stapel, Tags, Formatierung ---------- */
@@ -496,6 +498,9 @@ function tidyT(t){
 const normT=t=>fixCloze(String(t||'')).replace(/\{\{c\d+::(.*?)(?:::.*?)?\}\}/g,'$1').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
 const findDup=(front,skipId)=>{const n=normT(front);return n?liveCards().find(c=>c.id!==skipId&&normT(c.front)===n)||null:null};
 const TPL={ruling:'Gericht und Az.: \nSachverhalt: \nLeitsatz: \nBedeutung: ',case:'I. Tatbestand\nII. Rechtswidrigkeit\nIII. Schuld\nErgebnis: ',dispute:'Streitstand: \nMeinung A: \nMeinung B: \nRechtsprechung: \nStellungnahme: '};
+let draft=null;
+document.addEventListener('input',e=>{const id=e.target&&e.target.id;if(['cf','cb','ctg','cn'].includes(id)){if(!draft||draft.k!==(editId||'new'))draft={k:editId||'new'};draft[id]=e.target.value}});
+document.addEventListener('change',e=>{if(e.target&&e.target.id==='ct'){if(!draft||draft.k!==(editId||'new'))draft={k:editId||'new'};draft.ct=e.target.value}});
 let spoke='',lastTab='learn',locs={cards:'',cases:''};
 const SAY=[[/§§?/g,'Paragraf '],[/\bArt\./g,'Artikel'],[/\bAbs\./g,'Absatz'],[/\bNr\./g,'Nummer'],[/\bvgl\./gi,'vergleiche'],[/\bggf\./g,'gegebenenfalls'],[/\bbzw\./g,'beziehungsweise'],[/z\. ?B\./g,'zum Beispiel'],[/d\. ?h\./g,'das heißt'],[/i\. ?V\. ?m\./g,'in Verbindung mit'],[/u\. ?a\./g,'unter anderem'],[/\*+/g,'']];
 const sayTxt=(t,rev)=>SAY.reduce((a,[r,v])=>a.replace(r,v),String(t||'').replace(/\{\{c\d+::(.*?)(?:::.*?)?\}\}/g,(m,a)=>rev?a:'Lücke'));
@@ -534,8 +539,8 @@ function goLoc(id){loc=id;q='';cview='browse';render();scrollTo(0,0)}
 function mk(f){askName(f?'Name des Ordners':'Name des Stapels','',v=>{const t=v.replace(/::/g,' ').trim();if(!t)return;const pa=loc?M.decks.get(loc):null,n=pa?pa.name+'::'+t:t;if(liveDecks().some(d=>d.name===n))return alert('Diesen Namen gibt es schon.');const d={id:uid(),name:n};if(f)d.folder=1;if(curSec())d.sec=curSec();setLocal('decks',d);persist('decks',d);render()})}
 function addMenu(){const c=loc?M.decks.get(loc):null,it=[['📁 Neuer Ordner',()=>mk(1)],['🗂️ Neuer Stapel',()=>mk(0)]];if(c&&!c.folder)it.push(['📝 Neue Karte',()=>openForm('')]);sheet(c?c.name.split('::').pop():'Neu anlegen',it)}
 function rowMenu(id){const d=M.decks.get(id);if(d)sheet(d.name.split('::').pop(),[['✏️ Umbenennen',()=>renameDeck(id)],['🗑 Löschen',()=>deleteDeck(id)]])}
-function openForm(id){editId=id||null;cview='form';formDeck=id?'':(loc&&M.decks.get(loc)&&!M.decks.get(loc).folder?loc:formDeck);render();scrollTo(0,0)}
-function closeForm(){cview='browse';editId=null;render()}
+function openForm(id){draft=null;editId=id||null;cview='form';formDeck=id?'':(loc&&M.decks.get(loc)&&!M.decks.get(loc).folder?loc:formDeck);render();scrollTo(0,0)}
+function closeForm(){draft=null;cview='browse';editId=null;render()}
 const TL={basic:'',cloze:'Lücke',steps:'Stufen',outline:'Gliederung',dispute:'Streit',case:'Fall',ruling:'Urteil'};
 function cardRows(l,path){shownIds=l.map(c=>c.id);return l.map(c=>{const d=M.decks.get(c.deck);return `<div class=nr onclick="${selMode?`selTap('${c.id}')`:`openForm('${c.id}')`}">${selMode?`<span class=ic>${sel.has(c.id)?'☑️':'⬜'}</span>`:''}<span class=tx>${esc(c.front.replace(/\{\{c\d+::(.*?)\}\}/g,'[$1]').slice(0,80))}<small>${[path&&d?deckLabel(d):'',esc(TL[c.type]||''),esc((c.tags||[]).join(', ')),esc(c.norm||'')].filter(Boolean).join(' · ')}</small></span>${selMode?'':`<button class="b g s" onclick="event.stopPropagation();del('${c.id}')">🗑</button>`}</div>`}).join('')}
 const browseHTML=()=>browseHTML0()+(selMode?selBar():'');
@@ -554,14 +559,14 @@ function formView(){
   const dks=liveDecks().filter(d=>!d.folder&&secOf(d)===curSec()).sort((a,b)=>a.name.localeCompare(b.name,'de'));
   if(!dks.length){cview='browse';return cardsView()}
   const e=M.cards.get(editId)||{type:curSec()==='cases'?'case':'basic',front:'',back:'',tags:[],deck:dks.some(d=>d.id===formDeck)?formDeck:dks[0].id};
-  const fl=flash;flash='';
+  const fl=flash;flash='';const dr=draft&&draft.k===(editId||'new')?draft:{};
   return `<div class=top><button class="b g s" onclick="closeForm()">‹ Zurück</button><b>${editId?'Karte bearbeiten':'Neue Karte'}</b></div>${fl?`<p><b>${fl}</b></p>`:''}
   <p class=mute style="margin:8px 0 0">Stapel</p><select id=cd onchange="formDeck=this.value">${dks.map(d=>`<option value=${d.id} ${e.deck===d.id?'selected':''}>${deckLabel(d)}</option>`).join('')}</select>
-  <p class=mute style="margin:0">Kartentyp</p><select id=ct onchange="hint()">${Object.entries(TYPES).filter(([k])=>(k==='case'||k==='ruling')===(curSec()==='cases')).map(([k,v])=>`<option value=${k} ${e.type===k?'selected':''}>${v}</option>`).join('')}</select>
-  <textarea id=cf lang=de spellcheck=true autocapitalize=sentences autocorrect=on placeholder="Vorderseite / Frage / Lückentext">${esc(e.front)}</textarea>
-  <textarea id=cb lang=de spellcheck=true autocapitalize=sentences autocorrect=on placeholder="Rückseite / Punkte">${esc(e.back)}</textarea>
-  <input id=ctg placeholder="Tags, durch Komma getrennt (z. B. Klausur, § 212)" value="${esc((e.tags||[]).join(', '))}">
-  <input id=cn placeholder="Normenkette (optional), z. B. §§ 823 Abs. 1, 249 BGB" value="${esc(e.norm||'')}">
+  <p class=mute style="margin:0">Kartentyp</p><select id=ct onchange="hint()">${Object.entries(TYPES).filter(([k])=>(k==='case'||k==='ruling')===(curSec()==='cases')).map(([k,v])=>`<option value=${k} ${(dr.ct||e.type)===k?'selected':''}>${v}</option>`).join('')}</select>
+  <textarea id=cf lang=de spellcheck=true autocapitalize=sentences autocorrect=on placeholder="Vorderseite / Frage / Lückentext">${esc(dr.cf??e.front)}</textarea>
+  <textarea id=cb lang=de spellcheck=true autocapitalize=sentences autocorrect=on placeholder="Rückseite / Punkte">${esc(dr.cb??e.back)}</textarea>
+  <input id=ctg placeholder="Tags, durch Komma getrennt (z. B. Klausur, § 212)" value="${esc(dr.ctg??(e.tags||[]).join(', '))}">
+  <input id=cn placeholder="Normenkette (optional), z. B. §§ 823 Abs. 1, 249 BGB" value="${esc(dr.cn??(e.norm||''))}">
   <p class=mute id=h></p>
   <button class=b onclick=saveCard()>${editId?'Änderung speichern':'Karte speichern'}</button>
   ${curSec()==='cases'?'':`<details><summary>Mehrere Karten auf einmal anlegen</summary>
@@ -616,8 +621,8 @@ function saveCard(){
   if(!f||(t!=='cloze'&&!b))return alert('Bitte Vorder- und Rückseite ausfüllen.');
   if(t==='cloze'&&!/\{\{c\d+::/.test(f))return alert('Mindestens eine Lücke nötig: {{c1::Text}}');
   const dup=findDup(f,editId);if(dup){const dd=M.decks.get(dup.deck);if(!confirm((normT(dup.back)===normT(b)?'Diese Karte gibt es schon':'Eine Karte mit derselben Vorderseite gibt es schon (andere Antwort)')+(dd?` in „${deckLabel(dd)}“`:'')+`:\n${dup.front.slice(0,80)}\n\nTrotzdem speichern?`))return}
-  if(editId){const c=M.cards.get(editId);Object.assign(c,{deck:$('#cd').value,type:t,front:f,back:b,tags,norm});persist('cards',c);editId=null;cview='browse'}
-  else{const c={id:uid(),deck:$('#cd').value,type:t,front:f,back:b,tags,norm,reps:0,due:today(),created:Date.now()};setLocal('cards',c);persist('cards',c);formDeck=c.deck;flash='Gespeichert ✓ – nächste Karte:'}
+  if(editId){const c=M.cards.get(editId);Object.assign(c,{deck:$('#cd').value,type:t,front:f,back:b,tags,norm});persist('cards',c);editId=null;cview='browse';draft=null}
+  else{const c={id:uid(),deck:$('#cd').value,type:t,front:f,back:b,tags,norm,reps:0,due:today(),created:Date.now()};setLocal('cards',c);persist('cards',c);formDeck=c.deck;draft=null;flash='Gespeichert ✓ – nächste Karte:'}
   render()}
 function bulkAdd(){
   const rows=$('#bulk').value.split('\n').map(x=>fixCloze(x.trim())).filter(Boolean),dk=$('#cd').value,tags=parseTags($('#ctg').value);
